@@ -1,0 +1,43 @@
+{
+  "_comment": "PUBLIC SETTINGS ONLY. chatWebhookUrl is the ACTIVE Analyze/search connection. Paste its COMPLETE HTTPS URL. Other connections below are PLANNED and NOT CONNECTED. Never put API keys, passwords, or tokens here. Commit, rerun GitHub Pages, and refresh after editing.",
+  "chatWebhookUrl": "https://jarctech-ai-n8n-rnd.onrender.com/webhook/chat",
+  "timeoutMs": 60000,
+  "plannedConnections": {
+    "tools": {
+      "_comment": "NOT IMPLEMENTED: shared catalog loading and admin saves. Local browser storage remains in use. Requires server-side admin authorization.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "categories": {
+      "_comment": "NOT IMPLEMENTED: shared category loading and admin edits.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "favorites": {
+      "_comment": "NOT IMPLEMENTED: each authenticated user's saved favorites across devices.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "preferences": {
+      "_comment": "NOT IMPLEMENTED: each authenticated user's saved settings. Current settings remain browser-local.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "notifications": {
+      "_comment": "NOT IMPLEMENTED: load notifications and save read state for the authenticated user.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "status": {
+      "_comment": "NOT IMPLEMENTED: live tool health and maintenance information. Leave writeUrl blank unless a future service needs it.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    }
+  }
+}
