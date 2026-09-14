@@ -1,5 +1,0 @@
-{
-  "_comment": "PUBLIC SETTINGS ONLY. Paste your COMPLETE n8n chat webhook URL below. Never add API keys, passwords, or tokens. Commit and rerun the GitHub Pages workflow after editing.",
-  "chatWebhookUrl": "https://jarctech-ai-n8n-rnd.onrender.com/webhook/chat",
-  "timeoutMs": 60000
-}
