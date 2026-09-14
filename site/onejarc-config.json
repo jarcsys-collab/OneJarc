@@ -1,6 +1,6 @@
 {
   "_comment": "PUBLIC SETTINGS ONLY. chatWebhookUrl is the ACTIVE Analyze/search connection. Paste its COMPLETE HTTPS URL. Other connections below are PLANNED and NOT CONNECTED. Never put API keys, passwords, or tokens here. Commit, rerun GitHub Pages, and refresh after editing.",
-  "chatWebhookUrl": "https://jarctech-ai-n8n-rnd.onrender.com/webhook/chat",
+  "chatWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/e5228a9c-395f-47a2-a521-88c77454f2fd",
   "timeoutMs": 60000,
   "plannedConnections": {
     "tools": {
