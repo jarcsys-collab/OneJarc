@@ -9968,10 +9968,8 @@ function createPrototypeAuthService(store, now = Date.now) {
 			const session = store.read();
 			if (!session || session.expiresAt <= now() || session.expiresAt > now() + 288e5) return null;
 			
-			// For prototype restoration, local store check remains fast.
-			// If you want n8n to validate session restoration later, fetch can be added here as well.
-			const account = DEMO_ACCOUNTS.find(({ user }) => user.id === session.userId);
-			return account ? { ...account.user } : null;
+			// Reads saved user directly from local session storage
+			return session.user || null;
 		},
 
 		async signIn(username, password) {
@@ -9981,9 +9979,7 @@ function createPrototypeAuthService(store, now = Date.now) {
 			try {
 				response = await fetch(N8N_LOGIN_URL, {
 					method: "POST",
-					headers: {
-						"Content-Type": "application/json"
-					},
+					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
 						username: cleanUsername,
 						password: password
@@ -9995,15 +9991,18 @@ function createPrototypeAuthService(store, now = Date.now) {
 
 			const data = await response.json().catch(() => ({}));
 
-			if (!response.ok) {
+			if (!response.ok || !data.user) {
 				throw new Error(data.message || data.error || "Incorrect username or password.");
 			}
+
+			const sessionDuration = typeof DEMO_SESSION_DURATION !== 'undefined' ? DEMO_SESSION_DURATION : 288e5;
 
 			try {
 				store.write({
 					version: 1,
 					userId: data.user.id,
-					expiresAt: now() + DEMO_SESSION_DURATION
+					user: data.user,
+					expiresAt: now() + sessionDuration
 				});
 			} catch {
 				throw new Error("Demo session could not be saved. Allow browser storage and try again.");
