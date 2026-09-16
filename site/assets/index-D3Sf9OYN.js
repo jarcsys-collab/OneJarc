@@ -9960,28 +9960,58 @@ function createSessionStore(storage) {
 /** Async interface also fits future /session, /login and /logout API adapters.
 * Restored roles come from the account model, not an editable stored role field.
 * The marker itself remains forgeable: this is UX simulation, not security. */
+const N8N_LOGIN_URL = "https://jarc-juno.app.n8n.cloud/webhook/onejarc-login";
+
 function createPrototypeAuthService(store, now = Date.now) {
 	return {
 		async restore() {
 			const session = store.read();
 			if (!session || session.expiresAt <= now() || session.expiresAt > now() + 288e5) return null;
+			
+			// For prototype restoration, local store check remains fast.
+			// If you want n8n to validate session restoration later, fetch can be added here as well.
 			const account = DEMO_ACCOUNTS.find(({ user }) => user.id === session.userId);
 			return account ? { ...account.user } : null;
 		},
+
 		async signIn(username, password) {
-			const account = DEMO_ACCOUNTS.find((item) => item.user.username === username.trim().toLowerCase() && item.password === password);
-			if (!account) throw new Error("Incorrect username or password.");
+			const cleanUsername = username ? username.trim().toLowerCase() : "";
+
+			let response;
+			try {
+				response = await fetch(N8N_LOGIN_URL, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify({
+						username: cleanUsername,
+						password: password
+					})
+				});
+			} catch {
+				throw new Error("Unable to connect to authentication service. Check network connection.");
+			}
+
+			const data = await response.json().catch(() => ({}));
+
+			if (!response.ok) {
+				throw new Error(data.message || data.error || "Incorrect username or password.");
+			}
+
 			try {
 				store.write({
 					version: 1,
-					userId: account.user.id,
+					userId: data.user.id,
 					expiresAt: now() + DEMO_SESSION_DURATION
 				});
 			} catch {
 				throw new Error("Demo session could not be saved. Allow browser storage and try again.");
 			}
-			return { ...account.user };
+
+			return { ...data.user };
 		},
+
 		async signOut() {
 			store.clear();
 		}
