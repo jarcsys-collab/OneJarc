@@ -15,6 +15,49 @@
   <body>
     <!-- React owns this region; keep all application behavior in readable source. -->
     <div id="root"></div>
+    <script>
+  // Bridge script to intercept hardcoded login or inject backend sync
+  window.addEventListener('DOMContentLoaded', () => {
+    // We listen for any form submission or click events on login buttons inside the React app
+    document.addEventListener('submit', async (e) => {
+      const form = e.target;
+      const emailInput = form.querySelector('input[type="text"], input[type="email"], input:not([type="password"])');
+      const passwordInput = form.querySelector('input[type="password"]');
+
+      if (emailInput && passwordInput) {
+        e.preventDefault(); // Stop default form submit if handled locally
+        
+        const email = emailInput.value;
+        const password = passwordInput.value;
+
+        try {
+          // Replace with your actual n8n Production or Test Webhook URL
+          const response = await fetch('YOUR_N8N_WEBHOOK_URL_HERE', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+          });
+
+          const data = await response.json();
+
+          if (data.success) {
+            // Save state cache and permissions to browser local storage
+            localStorage.setItem('userState', JSON.stringify(data.lastState));
+            localStorage.setItem('userPermissions', JSON.stringify(data.permissions));
+            localStorage.setItem('userName', data.name);
+
+            // Force reload to let the React app pick up the authenticated state
+            window.location.reload();
+          } else {
+            alert('Invalid credentials from database');
+          }
+        } catch (err) {
+          console.error('Backend connection failed:', err);
+        }
+      }
+    });
+  });
+</script>
     <noscript>JavaScript is required to use the OneJarc company tool hub.</noscript>
   </body>
 </html>
