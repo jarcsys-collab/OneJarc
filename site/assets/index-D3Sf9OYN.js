@@ -32581,7 +32581,7 @@ function AdminWorkspace({ section, onSection, onExit }) {
 											className: "min-h-11",
 											children: entry.enabled ? "Disable Tool" : "Enable Tool"
 										}),
-                                        backendConfig.dataSource !== "api" && can(user, "canDeleteTool") && (0, import_jsx_runtime.jsx)(DropdownMenuItem, {
+                                        can(user, "canDeleteTool") && (0, import_jsx_runtime.jsx)(DropdownMenuItem, {
                                             disabled: catalog.busy,
                                             onClick: () => {
                                                 setError("");
