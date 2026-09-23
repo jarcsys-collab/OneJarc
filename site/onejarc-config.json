@@ -1,0 +1,47 @@
+{
+  "_comment": "PUBLIC SETTINGS ONLY. Chat, new-tool creation, and MongoDB-backed catalog reading are connected. Never put credentials here. Existing-tool edits still need their own backend workflows.",
+  "chatWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/e5228a9c-395f-47a2-a521-88c77454f2fd",
+  "loginWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/onejarc-login",
+  "timeoutMs": 60000,
+  "plannedConnections": {
+    "tools": {
+      "_comment": "Catalog reads now use getToolsWebhookUrl. Existing-tool update/archive/publish workflows are not yet connected.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "categories": {
+      "_comment": "NOT IMPLEMENTED: shared category loading and admin edits.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "favorites": {
+      "_comment": "NOT IMPLEMENTED: each authenticated user's saved favorites across devices.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "preferences": {
+      "_comment": "NOT IMPLEMENTED: each authenticated user's saved settings. Current settings remain browser-local.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "notifications": {
+      "_comment": "NOT IMPLEMENTED: load notifications and save read state for the authenticated user.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    },
+    "status": {
+      "_comment": "NOT IMPLEMENTED: live tool health and maintenance information. Leave writeUrl blank unless a future service needs it.",
+      "enabled": false,
+      "readUrl": "",
+      "writeUrl": ""
+    }
+  },
+  "createToolWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/create-tool",
+  "getToolsWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/get-tools",
+  "getToolCredsWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/get-tool-creds"
+}
