@@ -1,0 +1,3 @@
+OneJarc GitHub-ready fixed v3
+- Runtime config parser ignores unknown public fields instead of blocking app startup.
+- Cache-busted main bundle: index-D3Sf9OYN-v3.js
