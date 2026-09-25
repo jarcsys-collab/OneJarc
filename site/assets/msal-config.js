@@ -40,10 +40,10 @@ export const powerBiRequest = Object.freeze({
 });
 
 export function assertMsalConfigReady() {
-  if (!AZURE_CLIENT_ID || AZURE_CLIENT_ID === '0f5c4d71-3249-4374-b536-3911fd60f4b4') {
+  if (!AZURE_CLIENT_ID || AZURE_CLIENT_ID === 'YOUR_AZURE_CLIENT_ID') {
     throw new Error('Power BI MSAL is not configured. Set AZURE_CLIENT_ID in assets/msal-config.js.');
   }
-  if (!AZURE_TENANT_ID || AZURE_TENANT_ID === 'dfc22d3a-9773-49e8-b017-a5d7a5fee3dd') {
+  if (!AZURE_TENANT_ID || AZURE_TENANT_ID === 'YOUR_AZURE_TENANT_ID') {
     throw new Error('Power BI MSAL is not configured. Set AZURE_TENANT_ID in assets/msal-config.js.');
   }
 }
