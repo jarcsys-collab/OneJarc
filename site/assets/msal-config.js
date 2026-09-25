@@ -6,8 +6,8 @@
  * NEVER place a client secret, password, access token, or refresh token in this file.
  */
 
-export const AZURE_CLIENT_ID = 'YOUR_AZURE_CLIENT_ID';
-export const AZURE_TENANT_ID = 'YOUR_TENANT_ID';
+export const AZURE_CLIENT_ID = '0f5c4d71-3249-4374-b536-3911fd60f4b4';
+export const AZURE_TENANT_ID = 'tenant id: dfc22d3a-9773-49e8-b017-a5d7a5fee3dd';
 
 export const msalConfig = Object.freeze({
   auth: {
