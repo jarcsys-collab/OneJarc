@@ -11,3 +11,6 @@ dist/
 # local notes
 SECURITY-NOTES.md
 .railway/*.local.*
+
+# n8n workflow exports (may contain URLs or keys) — never commit
+n8n-export/
