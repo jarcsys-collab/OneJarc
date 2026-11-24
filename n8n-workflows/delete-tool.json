@@ -1,0 +1,223 @@
+{
+  "name": "OneJarc - delete-tool",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "delete-tool",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "21806281-a871-4d48-a77e-5de10574142f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "2def4bf1-5d43-41fc-8718-b9ccdf36c062"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Validates the request the OneJarc server forwards (POST, JSON body, X-OneJarc-* headers).\n// Output: { ok: true, id, ... } or { ok: false, status, body } (answered by \"Respond\").\nconst req = $input.first().json;\nconst headers = req.headers || {};\nconst body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : null;\nconst fail = (status, message) => [{ json: { ok: false, status, body: { success: false, error: message } } }];\nconst isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);\n\n// The OneJarc server only forwards admin actions for admins and always sends this header.\n// (Real protection for the URL itself: add Header Auth to the Webhook node later.)\nif (String(headers['x-onejarc-user-is-admin'] || '').toLowerCase() !== 'true') return fail(403, 'Admin access is required.');\nif (!body) return fail(400, 'The request body must be a JSON object.');\nconst id = typeof body.id === 'string' ? body.id.trim() : '';\nif (!id || id.length > 200 || /[\\u0000-\\u001f]/.test(id)) return fail(400, 'A tool id is required.');\n\n// Matches the document whether its _id is an ObjectId or a string, or whether it uses a\n// separate string \"id\" field (get-tools.js accepts either). $literal stops an id that starts\n// with \"$\" from being read as a field path.\nconst match = { $or: [{ $expr: { $eq: [{ $toString: '$_id' }, { $literal: id }] } }, { id }] };\nreturn [{ json: { ok: true, id, query: JSON.stringify(match) } }];\n"
+      },
+      "id": "07d5f9c8-99b7-44c9-953b-b3b895cb2b29",
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "e9805a87-ee86-4312-a142-eb7355f4584b",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d9a83a65-62ed-4c6c-83aa-653599e62b5f",
+      "name": "Input valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "collection": "tools",
+        "query": "={{ $json.query }}"
+      },
+      "id": "297b42a0-8017-4893-9936-01158eb46cfd",
+      "name": "Delete tool",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        200
+      ],
+      "credentials": {
+        "mongoDb": {
+          "id": "REPLACE_ME",
+          "name": "MongoDB account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// deletedCount 0 means no document matched the id.\nconst input = $('Validate input').first().json;\nconst r = $input.first().json || {};\nif (r.error || typeof r.deletedCount !== 'number') return [{ json: { status: 500, body: { success: false, error: 'The database delete failed. Check the n8n execution log.' } } }];\nif (r.deletedCount === 0) return [{ json: { status: 404, body: { success: false, error: 'This tool no longer exists in the database. Reload the catalog.' } } }];\nreturn [{ json: { status: 200, body: { success: true, id: input.id } } }];\n"
+      },
+      "id": "af0b582e-857b-4f58-ad50-45789ccaf532",
+      "name": "Delete result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Error output of a MongoDB node (connection, credential, query or write failure).\n// Details stay in the n8n execution log; the admin sees a short JSON error.\nreturn [{ json: { status: 500, body: { success: false, error: 'The database operation failed. Check the n8n execution log.' } } }];\n"
+      },
+      "id": "9c7904d7-fb54-4d10-8974-ee64b1118e79",
+      "name": "Database error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.status }}"
+        }
+      },
+      "id": "3764e59f-324e-48c4-8412-99d3ba5eaecb",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Input valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input valid?": {
+      "main": [
+        [
+          {
+            "node": "Delete tool",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete tool": {
+      "main": [
+        [
+          {
+            "node": "Delete result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Database error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete result": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Database error": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}
