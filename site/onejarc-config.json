@@ -1,7 +1,7 @@
 {
-  "_comment": "PUBLIC SETTINGS ONLY. Chat, new-tool creation, and MongoDB-backed catalog reading are connected. Never put credentials here. Existing-tool edits still need their own backend workflows.",
-  "chatWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/e5228a9c-395f-47a2-a521-88c77454f2fd",
-  "loginWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/onejarc-login",
+  "_comment": "PUBLIC SETTINGS ONLY. Every URL here is a same-origin path on the OneJarc server, which signs users in with Microsoft Entra ID and forwards /api/n8n/* to n8n. The real n8n webhook URLs live only in the server environment (N8N_URL_*); none remain in the frontend. loginWebhookUrl is still required by the config parser but is unused (sign-in is /auth/login). Never put credentials here.",
+  "chatWebhookUrl": "/api/n8n/chat",
+  "loginWebhookUrl": "/auth/login",
   "timeoutMs": 60000,
   "plannedConnections": {
     "tools": {
@@ -41,7 +41,7 @@
       "writeUrl": ""
     }
   },
-  "createToolWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/create-tool",
-  "getToolsWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/get-tools",
-  "getToolCredsWebhookUrl": "https://jarc-juno.app.n8n.cloud/webhook/get-tool-creds"
+  "createToolWebhookUrl": "/api/n8n/create-tool",
+  "getToolsWebhookUrl": "/api/n8n/get-tools",
+  "getToolCredsWebhookUrl": "/api/n8n/get-tool-creds"
 }

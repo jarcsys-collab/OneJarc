@@ -1,5 +1,7 @@
 // OneJarc MongoDB-backed catalog reader.
-// The URL itself lives in ../onejarc-config.json as getToolsWebhookUrl.
+// The URL lives in ../onejarc-config.json as getToolsWebhookUrl (the same-origin
+// server path /api/n8n/get-tools; the server forwards to n8n). See PATCHES.md.
+import { apiFetch } from "./api-fetch.js";
 
 const DEFAULT_COLOR = "#29b7aa";
 
@@ -82,29 +84,19 @@ export async function fetchToolCatalogSnapshot(settings, revision = 0, fetchImpl
 
   let response;
   try {
-    response = await fetchImpl(settings.getToolsWebhookUrl, {
-      method: "GET",
-      headers: { "Accept": "application/json" },
-      credentials: "omit",
-      redirect: "error",
-      cache: "no-store",
-      signal: AbortSignal.timeout(settings.timeoutMs || 60000)
-    });
+    response = await apiFetch(settings.getToolsWebhookUrl, { method: "GET", timeoutMs: settings.timeoutMs || 60000, fetchImpl });
   } catch (error) {
     throw new Error(error?.name === "TimeoutError" || error?.name === "AbortError"
       ? "Loading tools from MongoDB timed out."
-      : "Could not load tools from MongoDB. Check the get-tools webhook and its CORS settings.");
+      : "Could not load tools. Check your connection and try again.");
   }
 
-  let body;
-  try {
-    body = await response.json();
-  } catch {
-    throw new Error("The get-tools webhook returned invalid JSON.");
-  }
-
+  const body = response.data;
   if (!response.ok) {
     throw new Error(typeof body?.error === "string" ? body.error : `get-tools failed with HTTP ${response.status}.`);
+  }
+  if (body === null) {
+    throw new Error("The get-tools webhook returned invalid JSON.");
   }
 
   // Your current n8n workflow returns an array directly. This also accepts

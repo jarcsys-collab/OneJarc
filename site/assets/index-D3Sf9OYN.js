@@ -9971,37 +9971,34 @@ function createSessionStore(storage) {
 * The marker itself remains forgeable: this is UX simulation, not security. */
 function createPrototypeAuthService(store, now = Date.now) {
 	return {
+		// PATCHED (PATCHES.md): identity comes from the same-origin server session
+		// (Microsoft Entra ID). `store` is no longer used.
 		async restore() {
-			const session = store.read();
-			if (!session || session.expiresAt <= now() || session.expiresAt > now() + 288e5) return null;
-			
-			// Reads saved user directly from local session storage
-			return session.user || null;
+			const response = await fetch("/api/me", { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+			const serverBuild = response.headers.get("X-OneJarc-Build");
+			const pageBuild = document.querySelector('meta[name="onejarc-build"]')?.content;
+			if (serverBuild && pageBuild && serverBuild !== pageBuild) {
+				let reloaded = null;
+				try { reloaded = window.sessionStorage.getItem("onejarc-build-reload"); } catch {}
+				if (reloaded !== serverBuild) {
+					try { window.sessionStorage.setItem("onejarc-build-reload", serverBuild); } catch {}
+					window.location.reload();
+				}
+			}
+			if (response.status === 401) return null;
+			if (!response.ok) throw new Error("Session check failed (HTTP " + response.status + ").");
+			const me = await response.json();
+			if (!me || typeof me.oid !== "string" || !me.oid) return null;
+			return { id: me.oid, username: me.email, displayName: me.name || me.email, email: me.email, role: me.isAdmin === true ? "admin" : "user" };
 		},
 
-		async signIn(username, password) {
-			// Login transport lives in assets/login.js. The webhook URL itself lives
-			// in onejarc-config.json so future URL changes do not require rebuilding.
-			const { signInWithWebhook } = await import("./login.js");
-			const user = await signInWithWebhook(username, password);
-			const sessionDuration = typeof DEMO_SESSION_DURATION !== "undefined" ? DEMO_SESSION_DURATION : 288e5;
-
-			try {
-				store.write({
-					version: 1,
-					userId: user.id,
-					user,
-					expiresAt: now() + sessionDuration
-				});
-			} catch {
-				throw new Error("Session could not be saved. Allow browser storage and try again.");
-			}
-
-			return { ...user };
+		async signIn() {
+			window.location.assign("/auth/login?returnTo=" + encodeURIComponent(location.pathname + location.search + location.hash));
+			return new Promise(() => {});
 		},
 
 		async signOut() {
-			store.clear();
+			window.location.assign("/auth/logout");
 		}
 	};
 }
@@ -10072,11 +10069,11 @@ function validateBackendConfig(config) {
 /** Public webhook URLs must not carry passwords, query tokens, or fragments. */
 function validateChatWebhookUrl(value) {
 	try {
-		const url = new URL(value);
-		if (typeof value !== "string" || value.length > 2048 || url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname === "/") throw new Error();
+		const url = new URL(value, window.location.origin);
+		if (typeof value !== "string" || value.length > 2048 || url.origin !== window.location.origin && url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname === "/") throw new Error();
 		return url.href;
 	} catch {
-		throw new Error("Use a complete HTTPS webhook URL without credentials, query parameters, or fragments.");
+		throw new Error("Use a same-origin path (e.g. /api/n8n/chat) or a complete HTTPS URL without credentials, query parameters, or fragments.");
 	}
 }
 /** Keep diagnostics and transport pointed at the same configured endpoint. */
@@ -10225,7 +10222,7 @@ function createApiClient(config, dependencies) {
 					headers,
 					body: serialized,
 					signal: controller.signal,
-					credentials: "omit",
+					credentials: "same-origin",
 					mode: "cors",
 					redirect: "error",
 					cache: "no-store",
@@ -10362,7 +10359,6 @@ function AuthProvider({ children, service: supplied }) {
 		explicitlySignedOut.current = true;
 		setUser(null);
 		setError("Your session expired. Sign in again.");
-		service.current?.signOut().catch(() => {});
 	}, []);
 	(0, import_react.useEffect)(() => {
 		let active = true;
@@ -10374,7 +10370,7 @@ function AuthProvider({ children, service: supplied }) {
 				const restored = await service.current.restore();
 				if (active && revision === identityRevision.current && !explicitlySignedOut.current) setUser(restored);
 			} catch {
-				if (active && revision === identityRevision.current) setError(companyMode ? "Company sign-in could not be restored. Please sign in again." : "Demo session storage is unavailable. Enable browser storage to sign in.");
+				if (active && revision === identityRevision.current) setError(companyMode ? "Company sign-in could not be restored. Please sign in again." : "Your sign-in could not be checked. Check your connection and try again.");
 			} finally {
 				if (active) setReady(true);
 			}
@@ -12693,7 +12689,7 @@ function useBackendServices() {
 		});
 		const apiMode = workspaceConfig.dataSource === "api";
 		return {
-			chat: createChatService(createApiClient(backendConfig, { getAccessToken })),
+			chat: createChatService(createApiClient(backendConfig, { getAccessToken, onUnauthorized: expireSession })),
 			apiMode,
 			catalog: apiMode ? createApiCatalogDataSource(client, actor) : createLocalCatalogDataSource(() => window.localStorage, actor),
 			workspace: apiMode ? createApiWorkspaceServices(client, actor) : createLocalWorkspaceServices(() => window.localStorage, actor),
@@ -18497,30 +18493,23 @@ function LoginScreen({ logo }) {
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						className: "mt-3 text-base leading-6 text-muted-foreground",
-						children: auth.companyMode ? "Use your company account to access OneJarc." : "Enter your username and password to access OneJarc."
+						children: "Sign in with your company Microsoft account to access OneJarc."
 					}),
-					auth.companyMode ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					true ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "mt-8 space-y-4",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
 							className: "h-12 w-full rounded-xl",
-							disabled: loading || !auth.companyReady,
-							onClick: async () => {
+							disabled: loading,
+							onClick: () => {
 								if (loading) return;
-								setLoading(true);
 								setError("");
-								try {
-									await auth.beginCompanySignIn();
-								} catch {
-									setError("Company sign-in could not be started. Contact your administrator.");
-								} finally {
-									setLoading(false);
-								}
+								window.location.assign("/auth/login?returnTo=" + encodeURIComponent(location.pathname + location.search + location.hash));
 							},
-							children: loading ? "Connecting…" : "Continue with company sign-in"
-						}), (error || auth.error || !auth.companyReady) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							children: loading ? "Connecting…" : "Sign in with Microsoft"
+						}), (error || auth.error) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 							role: "alert",
 							className: "text-sm text-muted-foreground",
-							children: error || auth.error || "Company sign-in is not configured yet. No demo credentials are sent to the API."
+							children: error || auth.error
 						})]
 					}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("form", {
 						onSubmit: submit,
@@ -18594,7 +18583,7 @@ function LoginScreen({ logo }) {
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ShieldCheck, {
 							className: "mt-0.5 size-5 shrink-0 text-primary",
 							"aria-hidden": "true"
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: auth.companyMode ? "API mode requires an approved company identity provider. Access to each service must also be authorized by the backend." : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_jsx_runtime.Fragment, { children: "Prototype access only. Demo credentials are visible in the frontend. Company SSO is not connected; do not enter a real company password." }) })]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: "Sign in with your company Microsoft account. OneJarc never sees your password; access to each tool is checked by the server." })]
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						className: "mt-7 text-center text-sm leading-6 text-muted-foreground lg:hidden",
@@ -35945,11 +35934,7 @@ function HubContent({ initialName = "ONE JARC", initialEmail = "one.jarc@jarcgro
 		}
 		setLaunchMessage(`Checking access to ${tool.name}...`, { tone: "info" });
 		try {
-			await launchAuthorizedTool(
-				tool.name,
-				auth.user?.email || auth.user?.username || "",
-				auth.user?.role || ""
-			);
+			await launchAuthorizedTool(tool.name, { toolId: tool.id });
 			setRecent((current) => [tool.id, ...current.filter((id) => id !== tool.id)].slice(0, 6));
 			setSelectedTool(null);
 		} catch (error) {
@@ -37157,7 +37142,7 @@ function validatePlannedConnections(input) {
 async function loadRuntimeConfig(pageUrl, fetchImpl = fetch) {
 	const response = await fetchImpl(new URL("./onejarc-config.json", pageUrl), {
 		cache: "no-store",
-		credentials: "omit",
+		credentials: "same-origin",
 		redirect: "error",
 		signal: AbortSignal.timeout(1e4)
 	});
@@ -37176,7 +37161,7 @@ var root = document.getElementById("root");
 if (!root) throw new Error("OneJarc requires the root element in index.html.");
 document.documentElement.classList.add("dark");
 root.textContent = "Loading OneJarc settings…";
-loadRuntimeConfig(window.location.href).then(() => {
+loadRuntimeConfig(document.baseURI).then(() => {
 	(0, import_client.createRoot)(root).render(/* @__PURE__ */ (0, import_jsx_runtime.jsx)(HubApp, {
 		initialName: "ONE JARC",
 		initialEmail: "one.jarc@jarcgroup.ph"

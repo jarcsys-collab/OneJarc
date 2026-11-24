@@ -1,26 +1,36 @@
 /**
  * OneJarc authorized tool launcher.
- * Calls n8n for authorization and supports:
+ * Asks the OneJarc server (which forwards to n8n) for authorization and supports:
  *   1) Power BI App-Owns-Data embedding when n8n returns category=Power BI + accessToken
  *   2) Standard embedded web/SaaS tools using targetUrl
+ * The server adds the signed-in user's email and role itself (see PATCHES.md).
  */
-export async function launchTool(toolName, userEmail, userRole) {
+import { apiFetch, apiErrorMessage } from './api-fetch.js';
+
+const GET_TOOL_CREDS_PATH = '/api/n8n/get-tool-creds';
+const EMBED_TOKEN_PATH = '/api/powerbi/embed-token';
+const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
+const DEFAULT_REFRESH_MS = 50 * 60 * 1000;
+const RETRY_REFRESH_MS = 60 * 1000;
+
+// Usage: launchTool(toolName, { toolId }).
+// The old form launchTool(toolName, email, role[, toolId]) still works; email and role are ignored.
+export async function launchTool(toolName, options = {}, _legacyRole, legacyToolId) {
+  const toolId = options && typeof options === 'object' ? options.toolId : legacyToolId;
   try {
-    const response = await fetch('https://jarc-juno.app.n8n.cloud/webhook/get-tool-creds', {
+    const response = await apiFetch(GET_TOOL_CREDS_PATH, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        toolName: toolName,
-        email: userEmail,
-        role: userRole
-      })
+      body: { toolName, ...(toolId ? { toolId } : {}) }
     });
 
     if (!response.ok) {
-      throw new Error(`Authorization request failed (${response.status}).`);
+      throw new Error(apiErrorMessage(response.data, `Authorization request failed (${response.status}).`));
     }
 
-    const data = await response.json();
+    const data = response.data;
+    if (!data || typeof data !== 'object') {
+      throw new Error('Authorization response was not valid JSON.');
+    }
 
     if (!data.authorized) {
       alert('Access Denied: You do not have permission to view this tool.');
@@ -29,7 +39,7 @@ export async function launchTool(toolName, userEmail, userRole) {
 
     // Power BI embedding using the Service Principal / Embed token returned by n8n.
     if (data.category === 'Power BI' && data.accessToken) {
-      showPowerBIReport(data, toolName);
+      showPowerBIReport(data, toolName, toolId);
       return data;
     }
 
@@ -47,7 +57,68 @@ export async function launchTool(toolName, userEmail, userRole) {
   }
 }
 
+// Power BI embed-token refresh: one active report at a time (one viewer overlay).
+let activeReport = null;
+let refreshTimer = null;
+let refreshDueAt = 0;
+let refreshTask = null;
+
+function stopTokenRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = null;
+  refreshDueAt = 0;
+  refreshTask = null;
+  activeReport = null;
+}
+
+function scheduleTokenRefresh(delayMs) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  const delay = Math.max(10000, delayMs);
+  refreshDueAt = Date.now() + delay;
+  refreshTimer = setTimeout(() => { refreshTimer = null; refreshTask?.(); }, delay);
+}
+
+function refreshDelayFor(expiration) {
+  const expiresAt = typeof expiration === 'string' && expiration ? Date.parse(expiration) : NaN;
+  return Number.isFinite(expiresAt) ? expiresAt - Date.now() - REFRESH_BEFORE_EXPIRY_MS : DEFAULT_REFRESH_MS;
+}
+
+function startTokenRefresh(report, toolName, toolId, expiration) {
+  stopTokenRefresh();
+  activeReport = report;
+  refreshTask = async () => {
+    if (activeReport !== report) return;
+    try {
+      const response = await apiFetch(EMBED_TOKEN_PATH, { method: 'POST', body: { toolId, toolName } });
+      if (activeReport !== report) return;
+      if (response.status === 401) { console.warn('Power BI token refresh stopped:', response.data.error); return; }
+      if (!response.ok || !response.data?.accessToken) {
+        throw new Error(apiErrorMessage(response.data, `Embed token refresh failed (${response.status}).`));
+      }
+      await report.setAccessToken(response.data.accessToken);
+      if (activeReport === report) scheduleTokenRefresh(refreshDelayFor(response.data.expiration));
+    } catch (error) {
+      console.error('Power BI token refresh failed; retrying in 1 minute:', error);
+      if (activeReport === report) scheduleTokenRefresh(RETRY_REFRESH_MS);
+    }
+  };
+  scheduleTokenRefresh(refreshDelayFor(expiration));
+}
+
+// Background tabs throttle timers; refresh as soon as the tab is visible again if a refresh is overdue.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && refreshTask && refreshDueAt && Date.now() >= refreshDueAt) {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = null;
+      refreshDueAt = 0;
+      refreshTask();
+    }
+  });
+}
+
 function createViewerShell(toolName, externalUrl) {
+  stopTokenRefresh();
   const existing = document.getElementById('onejarc-embedded-tool-viewer');
   if (existing) existing.remove();
 
@@ -97,6 +168,7 @@ function createViewerShell(toolName, externalUrl) {
   close.textContent = 'Close';
   Object.assign(close.style, buttonStyle());
   close.addEventListener('click', () => {
+    stopTokenRefresh();
     const pbiContainer = overlay.querySelector('#powerbi-container');
     if (pbiContainer && window.powerbi) {
       try { window.powerbi.reset(pbiContainer); } catch (_) {}
@@ -112,7 +184,7 @@ function createViewerShell(toolName, externalUrl) {
   return overlay;
 }
 
-function showPowerBIReport(data, toolName) {
+function showPowerBIReport(data, toolName, toolId) {
   const embedUrl = data.embedUrl || data.targetUrl;
   if (!embedUrl || !data.reportId) {
     throw new Error('Power BI authorization response is missing reportId or embedUrl/targetUrl.');
@@ -148,7 +220,11 @@ function showPowerBIReport(data, toolName) {
   };
 
   window.powerbi.reset(pbiReportContainer);
-  window.powerbi.embed(pbiReportContainer, config);
+  const report = window.powerbi.embed(pbiReportContainer, config);
+  if (report && typeof report.setAccessToken === 'function') {
+    startTokenRefresh(report, toolName, toolId, data.expiration ?? data.tokenExpiration ?? null);
+  }
+  return report;
 }
 
 function showEmbeddedTool(targetUrl, toolName) {

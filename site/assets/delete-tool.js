@@ -1,24 +1,19 @@
-// OneJarc Delete Tool webhook helper.
-// Replace ONLY the URL below with your production n8n delete webhook.
-const DELETE_TOOL_WEBHOOK_URL = "PASTE_YOUR_DELETE_WEBHOOK_HERE";
+// OneJarc Delete Tool helper.
+// Same-origin server path; the server forwards to the n8n URL in N8N_URL_DELETE_TOOL
+// and answers 501 "This action is not connected to n8n yet." until it is set (see PATCHES.md).
+import { apiFetch } from "./api-fetch.js";
+const DELETE_TOOL_PATH = "/api/n8n/delete-tool";
 
 export async function submitDeleteTool(toolId, fetchImpl = fetch) {
-  if (!DELETE_TOOL_WEBHOOK_URL || DELETE_TOOL_WEBHOOK_URL === "PASTE_YOUR_DELETE_WEBHOOK_HERE") {
-    throw new Error("Delete Tool webhook is not configured. Open assets/delete-tool.js and paste your n8n webhook URL.");
+  let response;
+  try {
+    response = await apiFetch(DELETE_TOOL_PATH, { method: "POST", body: { id: toolId }, fetchImpl });
+  } catch {
+    throw new Error("Could not confirm the delete. Check your connection, and check the database before retrying.");
   }
 
-  const response = await fetchImpl(DELETE_TOOL_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "omit",
-    redirect: "error",
-    body: JSON.stringify({ id: toolId })
-  });
-
-  let result;
-  try {
-    result = await response.json();
-  } catch {
+  const result = response.data;
+  if (response.ok && result === null) {
     throw new Error("Delete webhook returned an invalid JSON response.");
   }
 

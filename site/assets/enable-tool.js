@@ -1,7 +1,7 @@
 import { postToolAction } from './tool-webhook-client.js';
-// PASTE your production n8n enable webhook URL here.
-// Contract and MongoDB instructions: ../WEBHOOKS.md
-export const WEBHOOK_URL = "PASTE_YOUR_ENABLE_WEBHOOK_HERE";
+// Same-origin OneJarc server path; the server forwards to the n8n URL in
+// N8N_URL_ENABLE_TOOL and answers 501 until it is set (see PATCHES.md).
+export const WEBHOOK_URL = "/api/n8n/enable-tool";
 export function submit(payload, fetchImpl = fetch) {
  return postToolAction(WEBHOOK_URL, 'enable', payload, fetchImpl);
 }
