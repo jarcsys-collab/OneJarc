@@ -1,0 +1,13 @@
+# dependencies / build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local secrets — never commit (public repo)
+.env
+.env.*
+!.env.example
+
+# local notes
+SECURITY-NOTES.md
+.railway/*.local.*

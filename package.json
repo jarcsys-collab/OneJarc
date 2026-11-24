@@ -1,1 +1,16 @@
-{"type":"module","private":true}
+{
+  "name": "onejarc",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @onejarc/server build",
+    "start": "node apps/server/dist/index.js",
+    "dev": "pnpm --filter @onejarc/server dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}
