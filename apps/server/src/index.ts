@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createApp } from "./app.js";
+import { createApp, type AppDeps } from "./app.js";
+import { connectMongo, type Mongo } from "./db/mongo.js";
+import { MemoryToolRepository, MongoToolRepository } from "./catalog/tool-repository.js";
+import { seedTools } from "./catalog/seed.js";
+import { MongoSessionStore } from "./session/session-store.js";
 import { ConfigError, loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 
@@ -37,14 +41,38 @@ if (config.devAuthBypass) {
   logger.warn("DEV_AUTH_BYPASS active", { oid: config.devAuthBypass.oid });
 }
 
-const { app, close } = createApp(config, { logger });
+// MongoDB: catalog + sessions. Without MONGODB_URI (local development only; the
+// config refuses it in production) both live in memory and are lost on restart.
+let mongo: Mongo | null = null;
+const deps: Partial<AppDeps> = {};
+try {
+  if (config.mongodbUri) {
+    mongo = await connectMongo(config.mongodbUri, config.mongodbDb);
+    const sessions = new MongoSessionStore(mongo.db);
+    await sessions.init();
+    deps.sessionStore = sessions;
+    deps.tools = new MongoToolRepository(mongo.db);
+    deps.healthCheck = () => mongo!.ping();
+    logger.info("mongodb connected", { db: config.mongodbDb });
+  } else {
+    deps.tools = new MemoryToolRepository();
+    logger.warn("MONGODB_URI is not set: catalog and sessions are in memory and are lost on restart");
+  }
+  if (await deps.tools.seedIfEmpty(seedTools())) logger.info("catalog seeded with example tools");
+} catch (err) {
+  // Never log the URI: it contains the database password.
+  logger.error("startup failed: could not prepare MongoDB", { error: err instanceof Error ? err.name + ": " + err.message.replace(/mongodb(\+srv)?:\/\/[^\s]+/g, "<uri>") : String(err) });
+  process.exit(1);
+}
+
+const { app, close } = createApp(config, { logger, ...deps });
 
 const server = app.listen(config.port, "0.0.0.0", () => {
   logger.info("server listening", {
     port: config.port,
     build: config.buildId,
     staticDir: config.staticDir,
-    pbiMode: config.pbi.mode,
+    chat: config.chat.anthropicApiKey ? `anthropic (${config.chat.model})` : "coming-soon",
   });
 });
 
@@ -59,7 +87,9 @@ function shutdown(signal: string): void {
   shuttingDown = true;
   logger.info("shutting down", { signal });
   close();
-  server.close(() => process.exit(0));
+  server.close(() => {
+    void (mongo?.close() ?? Promise.resolve()).finally(() => process.exit(0));
+  });
   server.closeIdleConnections();
   setTimeout(() => process.exit(0), 10_000).unref();
 }

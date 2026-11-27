@@ -1,7 +1,6 @@
 import { postToolAction } from './tool-webhook-client.js';
-// Same-origin OneJarc server path; the server forwards to the n8n URL in
-// N8N_URL_RESTORE_TOOL and answers 501 until it is set (see PATCHES.md).
-export const WEBHOOK_URL = "/api/n8n/restore-tool";
+// Same-origin OneJarc server path; the server writes the change to MongoDB (see PATCHES.md).
+export const WEBHOOK_URL = "/api/tools/restore";
 export function submit(payload, fetchImpl = fetch) {
  return postToolAction(WEBHOOK_URL, 'restore', payload, fetchImpl);
 }

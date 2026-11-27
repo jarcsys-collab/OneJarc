@@ -10014,7 +10014,7 @@ var BACKEND_PROFILES = {
 	staging: {
 		environment: "staging",
 		dataSource: "api",
-		apiBaseUrl: "https://jarctech-ai-n8n-rnd.onrender.com/webhook",
+		apiBaseUrl: "https://onejarc.invalid/api",
 		timeoutMs: 6e4,
 		authMode: "prototype-chat"
 	},
@@ -10047,7 +10047,7 @@ function isAllowedLaunchUrl(value, environment) {
 function validateBackendConfig(config) {
 	if (config.chatWebhookUrl !== void 0) validateChatWebhookUrl(config.chatWebhookUrl);
 	if (config.authMode && !["bearer", "prototype-chat"].includes(config.authMode)) throw new Error("Invalid API authentication mode.");
-	if (config.authMode === "prototype-chat" && (config.environment !== "staging" || config.dataSource !== "api" || config.apiBaseUrl !== "https://jarctech-ai-n8n-rnd.onrender.com/webhook")) throw new Error("Prototype chat is restricted to the named staging webhook.");
+	if (config.authMode === "prototype-chat" && (config.environment !== "staging" || config.dataSource !== "api" || config.apiBaseUrl !== "https://onejarc.invalid/api")) throw new Error("Prototype chat is restricted to the named staging endpoint.");
 	if (![
 		"development",
 		"staging",
@@ -10073,7 +10073,7 @@ function validateChatWebhookUrl(value) {
 		if (typeof value !== "string" || value.length > 2048 || url.origin !== window.location.origin && url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname === "/") throw new Error();
 		return url.href;
 	} catch {
-		throw new Error("Use a same-origin path (e.g. /api/n8n/chat) or a complete HTTPS URL without credentials, query parameters, or fragments.");
+		throw new Error("Use a same-origin path (e.g. /api/chat) or a complete HTTPS URL without credentials, query parameters, or fragments.");
 	}
 }
 /** Keep diagnostics and transport pointed at the same configured endpoint. */
@@ -10434,7 +10434,7 @@ function useAuth() {
 }
 //#endregion
 //#region src/models/chat-service.ts
-/** n8n test workflow contract. Send only the user's submitted description, never
+/** OneJarc server chat contract (POST /api/chat). Send only the user's submitted description, never
 * credentials, browser records, roles, or the catalog. Replies render as text. */
 function parseChatReply(value) {
 	const record = value;
@@ -12161,8 +12161,8 @@ async function executeCatalogCommand(repository, actor, command, expectedRevisio
 * Original logic is retained. Edit this readable copy if maintaining the standalone
 * package; regenerate from the main project for future synchronized snapshots.
 * See ARCHITECTURE.md for the MVC-style boundary and demo/backend limits. */
-/** OneJarc's public API contract, not n8n's management API. A gateway can map
-* these paths onto workflows without changing components. Audits stay server-owned. */
+/** OneJarc's public API contract. A gateway can map
+* these paths onto a backend without changing components. Audits stay server-owned. */
 function pathId(id) {
 	if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new ApiError("INVALID_REQUEST");
 	return encodeURIComponent(id);
@@ -12326,7 +12326,7 @@ function createLocalCatalogDataSource(storage, actor) {
    const guarded={read:()=>local.read(),async write(snapshot,expectedRevision){
     // executeCatalogCommand validates permissions, fields and revision BEFORE this callback.
     if(isTool && !confirmed.has(key)) {
-     if(isCreate) await submitNewTool(command.definition,backendConfig);
+     if(isCreate) await submitNewTool(command.definition,backendConfig,fetch,command.publish === true);
      else if(command.type==='delete') await submitDeleteTool(command.id);
      else await submitToolAction(command,before,snapshot,key);
      confirmed.add(key);
@@ -32619,7 +32619,7 @@ function AdminWorkspace({ section, onSection, onExit }) {
                                                 setConfirmation({
                                                     command: { type: "delete", id: entry.id },
                                                     title: `Delete ${tool.name}?`,
-                                                    description: "Permanently delete this tool through the configured n8n webhook. This cannot be undone."
+                                                    description: "Permanently delete this tool from the catalog. This cannot be undone."
                                                 });
                                             },
                                             className: "min-h-11 text-destructive",
@@ -36433,7 +36433,7 @@ function HubContent({ initialName = "ONE JARC", initialEmail = "one.jarc@jarcgro
 												role: "alert",
 												className: "mt-3 text-sm text-destructive",
 												children: [
-													"n8n request failed: ",
+													"Assistant request failed: ",
 													chatController.error,
 													" Local catalog matches below are not an API reply."
 												]
@@ -36446,11 +36446,11 @@ function HubContent({ initialName = "ONE JARC", initialEmail = "one.jarc@jarcgro
 												})]
 											}),
 											chatController.reply && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
-												"aria-label": "n8n workflow response",
+												"aria-label": "Assistant reply",
 												className: "mt-3 rounded-xl border border-border bg-card p-4 text-sm text-foreground",
 												children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
 													className: "font-semibold",
-													children: "n8n workflow response"
+													children: "Assistant reply"
 												}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 													className: "mt-2 whitespace-pre-wrap",
 													children: chatController.reply

@@ -1,6 +1,6 @@
 // OneJarc MongoDB-backed catalog reader.
 // The URL lives in ../onejarc-config.json as getToolsWebhookUrl (the same-origin
-// server path /api/n8n/get-tools; the server forwards to n8n). See PATCHES.md.
+// server path /api/tools; the server reads MongoDB). See PATCHES.md.
 import { apiFetch } from "./api-fetch.js";
 
 const DEFAULT_COLOR = "#29b7aa";
@@ -99,8 +99,7 @@ export async function fetchToolCatalogSnapshot(settings, revision = 0, fetchImpl
     throw new Error("The get-tools webhook returned invalid JSON.");
   }
 
-  // Your current n8n workflow returns an array directly. This also accepts
-  // { tools: [...] } so the frontend remains compatible if n8n is wrapped later.
+  // The server returns an array directly. { tools: [...] } is accepted too.
   const records = Array.isArray(body) ? body : Array.isArray(body?.tools) ? body.tools : null;
   if (!records) throw new Error("The get-tools webhook must return an array of tools or an object with a tools array.");
 

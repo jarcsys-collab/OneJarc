@@ -1,24 +1,23 @@
 /**
  * OneJarc authorized tool launcher.
- * Asks the OneJarc server (which forwards to n8n) for authorization and supports:
- *   1) Power BI App-Owns-Data embedding when n8n returns category=Power BI + accessToken
- *   2) Standard embedded web/SaaS tools using targetUrl
- * The server adds the signed-in user's email and role itself (see PATCHES.md).
+ * Asks the OneJarc server whether the signed-in user may open the tool
+ * (POST /api/tools/launch) and opens the URL it returns:
+ *   - openBehavior "new-tab":  a new browser tab (falls back to the viewer if pop-ups are blocked)
+ *   - openBehavior "same-tab": this tab
+ *   - otherwise ("embedded"):  the full-screen viewer below
+ * Power BI reports come back as their secure-embed URL and open in the viewer
+ * with the user's own Power BI sign-in. See PATCHES.md.
  */
 import { apiFetch, apiErrorMessage } from './api-fetch.js';
 
-const GET_TOOL_CREDS_PATH = '/api/n8n/get-tool-creds';
-const EMBED_TOKEN_PATH = '/api/powerbi/embed-token';
-const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
-const DEFAULT_REFRESH_MS = 50 * 60 * 1000;
-const RETRY_REFRESH_MS = 60 * 1000;
+const LAUNCH_PATH = '/api/tools/launch';
 
 // Usage: launchTool(toolName, { toolId }).
 // The old form launchTool(toolName, email, role[, toolId]) still works; email and role are ignored.
 export async function launchTool(toolName, options = {}, _legacyRole, legacyToolId) {
   const toolId = options && typeof options === 'object' ? options.toolId : legacyToolId;
   try {
-    const response = await apiFetch(GET_TOOL_CREDS_PATH, {
+    const response = await apiFetch(LAUNCH_PATH, {
       method: 'POST',
       body: { toolName, ...(toolId ? { toolId } : {}) }
     });
@@ -37,19 +36,18 @@ export async function launchTool(toolName, options = {}, _legacyRole, legacyTool
       return data;
     }
 
-    // Power BI embedding using the Service Principal / Embed token returned by n8n.
-    if (data.category === 'Power BI' && data.accessToken) {
-      showPowerBIReport(data, toolName, toolId);
-      return data;
+    if (!data.targetUrl) {
+      throw new Error('Authorization succeeded, but no target URL was returned.');
     }
 
-    // Standard web application / SaaS fallback.
-    if (data.targetUrl) {
+    if (data.openBehavior === 'same-tab') {
+      window.location.assign(data.targetUrl);
+    } else if (data.openBehavior === 'new-tab') {
+      openInNewTab(data.targetUrl, toolName);
+    } else {
       showEmbeddedTool(data.targetUrl, toolName);
-      return data;
     }
-
-    throw new Error('Authorization succeeded, but no target URL or Power BI embed configuration was returned.');
+    return data;
   } catch (error) {
     console.error('Authorization error:', error);
     alert('An error occurred during tool authorization.');
@@ -57,68 +55,18 @@ export async function launchTool(toolName, options = {}, _legacyRole, legacyTool
   }
 }
 
-// Power BI embed-token refresh: one active report at a time (one viewer overlay).
-let activeReport = null;
-let refreshTimer = null;
-let refreshDueAt = 0;
-let refreshTask = null;
-
-function stopTokenRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer);
-  refreshTimer = null;
-  refreshDueAt = 0;
-  refreshTask = null;
-  activeReport = null;
-}
-
-function scheduleTokenRefresh(delayMs) {
-  if (refreshTimer) clearTimeout(refreshTimer);
-  const delay = Math.max(10000, delayMs);
-  refreshDueAt = Date.now() + delay;
-  refreshTimer = setTimeout(() => { refreshTimer = null; refreshTask?.(); }, delay);
-}
-
-function refreshDelayFor(expiration) {
-  const expiresAt = typeof expiration === 'string' && expiration ? Date.parse(expiration) : NaN;
-  return Number.isFinite(expiresAt) ? expiresAt - Date.now() - REFRESH_BEFORE_EXPIRY_MS : DEFAULT_REFRESH_MS;
-}
-
-function startTokenRefresh(report, toolName, toolId, expiration) {
-  stopTokenRefresh();
-  activeReport = report;
-  refreshTask = async () => {
-    if (activeReport !== report) return;
-    try {
-      const response = await apiFetch(EMBED_TOKEN_PATH, { method: 'POST', body: { toolId, toolName } });
-      if (activeReport !== report) return;
-      if (response.status === 401) { console.warn('Power BI token refresh stopped:', response.data.error); return; }
-      if (!response.ok || !response.data?.accessToken) {
-        throw new Error(apiErrorMessage(response.data, `Embed token refresh failed (${response.status}).`));
-      }
-      await report.setAccessToken(response.data.accessToken);
-      if (activeReport === report) scheduleTokenRefresh(refreshDelayFor(response.data.expiration));
-    } catch (error) {
-      console.error('Power BI token refresh failed; retrying in 1 minute:', error);
-      if (activeReport === report) scheduleTokenRefresh(RETRY_REFRESH_MS);
-    }
-  };
-  scheduleTokenRefresh(refreshDelayFor(expiration));
-}
-
-// Background tabs throttle timers; refresh as soon as the tab is visible again if a refresh is overdue.
-if (typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && refreshTask && refreshDueAt && Date.now() >= refreshDueAt) {
-      if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = null;
-      refreshDueAt = 0;
-      refreshTask();
-    }
-  });
+function openInNewTab(targetUrl, toolName) {
+  // Open blank first so a blocked pop-up can be detected (noopener always returns null).
+  const tab = window.open('', '_blank');
+  if (!tab) {
+    showEmbeddedTool(targetUrl, toolName);
+    return;
+  }
+  tab.opener = null;
+  tab.location.href = targetUrl;
 }
 
 function createViewerShell(toolName, externalUrl) {
-  stopTokenRefresh();
   const existing = document.getElementById('onejarc-embedded-tool-viewer');
   if (existing) existing.remove();
 
@@ -167,14 +115,7 @@ function createViewerShell(toolName, externalUrl) {
   close.type = 'button';
   close.textContent = 'Close';
   Object.assign(close.style, buttonStyle());
-  close.addEventListener('click', () => {
-    stopTokenRefresh();
-    const pbiContainer = overlay.querySelector('#powerbi-container');
-    if (pbiContainer && window.powerbi) {
-      try { window.powerbi.reset(pbiContainer); } catch (_) {}
-    }
-    overlay.remove();
-  });
+  close.addEventListener('click', () => overlay.remove());
 
   actions.appendChild(close);
   header.append(title, actions);
@@ -182,49 +123,6 @@ function createViewerShell(toolName, externalUrl) {
   document.body.appendChild(overlay);
 
   return overlay;
-}
-
-function showPowerBIReport(data, toolName, toolId) {
-  const embedUrl = data.embedUrl || data.targetUrl;
-  if (!embedUrl || !data.reportId) {
-    throw new Error('Power BI authorization response is missing reportId or embedUrl/targetUrl.');
-  }
-
-  if (!window.powerbi) {
-    throw new Error('Power BI JavaScript SDK is not loaded.');
-  }
-
-  const overlay = createViewerShell(toolName, data.targetUrl || embedUrl);
-  const pbiReportContainer = document.createElement('div');
-  pbiReportContainer.id = 'powerbi-container';
-  Object.assign(pbiReportContainer.style, {
-    width: '100%',
-    flex: '1',
-    minHeight: '0',
-    background: '#fff'
-  });
-  overlay.appendChild(pbiReportContainer);
-
-  const config = {
-    type: 'report',
-    id: data.reportId,
-    embedUrl: embedUrl,
-    accessToken: data.accessToken,
-    tokenType: 1, // models.TokenType.Embed (App-Owns-Data)
-    settings: {
-      panes: {
-        filters: { expanded: false, visible: false },
-        pageNavigation: { visible: true }
-      }
-    }
-  };
-
-  window.powerbi.reset(pbiReportContainer);
-  const report = window.powerbi.embed(pbiReportContainer, config);
-  if (report && typeof report.setAccessToken === 'function') {
-    startTokenRefresh(report, toolName, toolId, data.expiration ?? data.tokenExpiration ?? null);
-  }
-  return report;
 }
 
 function showEmbeddedTool(targetUrl, toolName) {

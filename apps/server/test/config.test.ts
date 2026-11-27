@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import path from "node:path";
-import { ConfigError, connectedUrl, loadConfig } from "../src/config.js";
+import { ConfigError, loadConfig } from "../src/config.js";
 import { MemorySessionStore } from "../src/session/session-store.js";
 import { decryptAuthTx, deriveAuthTxKey, encryptAuthTx } from "../src/auth/authtx.js";
 import { SECRET } from "./helpers.js";
@@ -36,9 +36,9 @@ describe("config", () => {
     expect(c.staticDir).toBe(path.resolve("/repo", "site"));
     expect(c.sessionMaxAgeMs).toBe(8 * 3_600_000);
     expect(c.trustProxy).toBe(1);
-    expect(c.n8nTimeoutMs).toBe(60_000);
-    expect(c.pbi.mode).toBe("n8n");
-    expect(c.pbi.clientId).toBe("c");
+    expect(c.mongodbUri).toBeNull();
+    expect(c.mongodbDb).toBe("onejarc");
+    expect(c.chat).toEqual({ anthropicApiKey: null, model: "claude-opus-5-5", ratePerMinute: 10 });
     expect(c.entra.cloudInstance).toBe("https://login.microsoftonline.com/");
     expect(c.buildId).toBe("dev-42");
     expect(c.secureCookies).toBe(false);
@@ -63,12 +63,16 @@ describe("config", () => {
     expect(() => loadConfig({ ...base, APP_BASE_URL: "https://localhost:3000", DEV_AUTH_BYPASS_OID: "x" })).toThrow(/Refusing/);
   });
 
-  it("connectedUrl treats empty / PASTE_ / invalid as not connected", () => {
-    expect(connectedUrl("")).toBeNull();
-    expect(connectedUrl(undefined)).toBeNull();
-    expect(connectedUrl("PASTE_URL_HERE")).toBeNull();
-    expect(connectedUrl("not a url")).toBeNull();
-    expect(connectedUrl("https://n8n.example.test/webhook/x")).toBe("https://n8n.example.test/webhook/x");
+  it("MONGODB_URI is required in production and must be a mongodb URL", () => {
+    expect(() => loadConfig({ ...base, NODE_ENV: "production" })).toThrow(/MONGODB_URI/);
+    expect(() => loadConfig({ ...base, MONGODB_URI: "postgres://x" })).toThrow(/mongodb:\/\//);
+    const c = loadConfig({ ...base, NODE_ENV: "production", MONGODB_URI: "mongodb://mongo:pw@mongodb.railway.internal:27017" });
+    expect(c.mongodbUri).toBe("mongodb://mongo:pw@mongodb.railway.internal:27017");
+  });
+
+  it("chat settings come from ANTHROPIC_API_KEY / CHAT_MODEL / CHAT_RATE_PER_MINUTE", () => {
+    const c = loadConfig({ ...base, ANTHROPIC_API_KEY: "k", CHAT_MODEL: "claude-sonnet-5-5", CHAT_RATE_PER_MINUTE: "3" });
+    expect(c.chat).toEqual({ anthropicApiKey: "k", model: "claude-sonnet-5-5", ratePerMinute: 3 });
   });
 });
 

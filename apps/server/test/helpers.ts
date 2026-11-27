@@ -6,7 +6,6 @@ import request from "supertest";
 import { createApp, type AppDeps } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import { silentLogger } from "../src/logger.js";
-import type { FetchLike } from "../src/api/n8n-client.js";
 
 export const ADMIN_OID = "00000000-0000-0000-0000-00000000000a";
 export const USER_OID = "00000000-0000-0000-0000-00000000000b";
@@ -54,38 +53,6 @@ export function makeConfig(env: Record<string, string | undefined> = {}, cwd = m
     },
     { cwd },
   );
-}
-
-export interface FetchCall {
-  url: string;
-  method: string;
-  headers: Record<string, string>;
-  body: unknown;
-  redirect: RequestInit["redirect"];
-}
-
-/** Fake fetch: records calls and answers via the handler (default: 200 {"ok":true}). */
-export function fakeFetch(handler?: (call: FetchCall) => Response | Promise<Response>) {
-  const calls: FetchCall[] = [];
-  const fn: FetchLike = async (input, init) => {
-    const headers: Record<string, string> = {};
-    new Headers(init?.headers).forEach((v, k) => (headers[k] = v));
-    const raw = typeof init?.body === "string" ? init.body : undefined;
-    const call: FetchCall = {
-      url: String(input),
-      method: init?.method ?? "GET",
-      headers,
-      body: raw === undefined ? undefined : JSON.parse(raw),
-      redirect: init?.redirect,
-    };
-    calls.push(call);
-    return handler ? handler(call) : jsonResponse({ ok: true, echo: call.body ?? null });
-  };
-  return { fn, calls };
-}
-
-export function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 }
 
 export function buildApp(config: Config, deps: Partial<AppDeps> = {}) {

@@ -1,6 +1,13 @@
 # OneJarc: GitHub Pages → GitHub + Railway, with Microsoft Entra ID sign-in
 
-Status: **PLAN ONLY — nothing implemented.** Written 2026-11-24. Awaiting approval.
+Status: written 2026-11-24 as a plan; rounds 1 and 2 are implemented on `railway-entra`.
+
+> **Update 2026-11-27 (round 2): n8n is removed.** The server no longer proxies n8n. Everything below that describes `/api/n8n/*`, `N8N_*` variables, n8n webhook secrets, `PBI_EMBED_MODE` or a service-principal Power BI path is **historical analysis only** and does not apply any more. What runs now:
+> - **Catalog:** native on MongoDB (`MONGODB_URI`, collection `tools`): `GET /api/tools` and `POST /api/tools/<create|delete|edit|duplicate|publish|unpublish|enable|disable|archive|restore>`, admin checks from `ADMIN_OBJECT_IDS`; drafts, disabled and archived tools are visible to admins only. Example tools are seeded once on first start.
+> - **Launch:** `POST /api/tools/launch`. Power BI opens the report's secure-embed URL with the viewer's own Power BI sign-in (no embed tokens, no service principal).
+> - **Chat:** `POST /api/chat`, answered by Claude through the Anthropic API when `ANTHROPIC_API_KEY` is set, otherwise "coming soon".
+> - **Sessions:** MongoDB (`sessions` collection, TTL index), so they survive redeploys. `/health` answers 503 when MongoDB is down.
+> - Current setup steps and variables: `SETUP-CHECKLIST.md` and `.env.example`. Frontend edits: `PATCHES.md`.
 Scope: hosting + authentication migration of the **current** build (`site/`). Not the modular rebuild in `PLAN.md`; this plan is designed to fit underneath it.
 
 Conventions: `B:<n>` = line in `site/assets/index-D3Sf9OYN.js` (the live, hand-patched bundle). Other paths are relative to the repo root. Line numbers were read from the working tree at `5f0dd20`. Items marked **[unverified]** could not be confirmed from official docs and must be tested.
@@ -542,19 +549,14 @@ export default defineRailway((ctx) => {
 | `ENTRA_CLIENT_SECRET` | sign-in app secret (option A) | — | Railway (from Entra) | **yes** |
 | `ENTRA_CERT_THUMBPRINT_SHA256` / `ENTRA_CERT_PRIVATE_KEY_B64` | certificate credential (option B, D6) | thumbprint / — | Railway | key: **yes** |
 | `ENTRA_ROLE_ADMIN` / `ENTRA_ROLE_USER` | App Role values | `admin` / `user` | IaC | no |
-| `PBI_CLIENT_ID` | Power BI service principal app ID | GUID | Railway (from Entra) | no |
-| `PBI_CLIENT_SECRET` (or `PBI_CERT_*`) | SP credential | — | Railway | **yes** |
-| `PBI_API_BASE` | REST base | `https://api.powerbi.com/v1.0/myorg` | IaC | no |
-| `PBI_EMBED_MODE` | `n8n` (stage A) or `server` (stage B) | `n8n` | Railway | no |
-| `N8N_WEBHOOK_SECRET` | value of `X-OneJarc-Webhook-Secret` | — (32+ random bytes) | Railway **and** the n8n Header Auth credential | **yes** |
-| `N8N_URL_CHAT`, `N8N_URL_GET_TOOLS`, `N8N_URL_CREATE_TOOL`, `N8N_URL_GET_TOOL_CREDS`, `N8N_URL_DELETE_TOOL`, `N8N_URL_EDIT_TOOL`, `N8N_URL_DUPLICATE_TOOL`, `N8N_URL_PUBLISH_TOOL`, `N8N_URL_UNPUBLISH_TOOL`, `N8N_URL_ENABLE_TOOL`, `N8N_URL_DISABLE_TOOL`, `N8N_URL_ARCHIVE_TOOL`, `N8N_URL_RESTORE_TOOL` | upstream webhook URLs; unset means 501 | `https://<n8n-host>/webhook/onejarc-v2/get-tools` | Railway (from n8n) | not secret once Header Auth is on, but keep them out of git |
-| `N8N_TIMEOUT_MS` | upstream timeout | `60000` | IaC | no |
-| `CATALOG_FILTER_NON_ADMIN` | strip drafts for non-admins | `false` → `true` after test | Railway | no |
 | `FRAME_SRC_EXTRA` | extra iframe hosts for CSP | `https://tool-a.example.com https://tool-b.example.com` | Railway | no |
 | `CSP_REPORT_ONLY` | CSP mode | `true` (staging first week) | Railway | no |
 | `LOG_LEVEL` | pino level | `info` | IaC | no |
 | `RAILWAY_GIT_COMMIT_SHA`, `RAILWAY_PUBLIC_DOMAIN`, `RAILWAY_ENVIRONMENT_NAME` | build id, domain, env | — | Railway (auto) | no |
-| `MONGO_URL` | **later** (§8): `${{MongoDB.MONGO_URL}}` reference, private network only | — | Railway reference | **yes** |
+| `MONGODB_URI` | MongoDB connection string: `${{MongoDB.MONGO_URL}}` reference, private network only (required in production) | — | Railway reference | **yes** |
+| `MONGODB_DB` | database name | `onejarc` | IaC | no |
+| `ANTHROPIC_API_KEY` | Claude API key for the chat; unset = "coming soon" | — | Railway | **yes** |
+| `CHAT_MODEL` / `CHAT_RATE_PER_MINUTE` | chat model and per-user limit | `claude-opus-5-5` / `10` | IaC | no |
 
 ---
 
@@ -726,12 +728,12 @@ export interface AccessRequestRepository { create(r: AccessRequest): Promise<Acc
 export interface ChatHistoryRepository { append(userId: string, m: ChatMessage): Promise<void>; list(userId: string, limit: number): Promise<ChatMessage[]> } // only if D13 = yes
 ```
 
-### 8.2 Phase plan (after cutover, separate approval)
+### 8.2 Phase plan (M1 and M2 are done; the catalog moved to MongoDB in round 2)
 
 **M1: provision.**
 - In the Railway project: **+ Create → Database → MongoDB**, in both environments.
-- Set the service variable `MONGO_URL=${{MongoDB.MONGO_URL}}`.
-- `MONGO_URL` resolves to `mongodb.railway.internal` and works **only at runtime, over the private network**: not during the build, not from your laptop.
+- Set the service variable `MONGODB_URI=${{MongoDB.MONGO_URL}}`. **Done.**
+- The reference resolves to `mongodb.railway.internal` and works **only at runtime, over the private network**: not during the build, not from your laptop.
 - Railway's Mongo listens on `::` and `0.0.0.0`. Environments created after 2025-10-16 are dual-stack; older ones are IPv6-only. Use Node 22 (`autoSelectFamily` default on); if connection fails in a legacy environment, add `dns.setDefaultResultOrder('verbatim')` [unverified for the mongodb driver]. Connect at startup, not in the build. Run index creation in `preDeploy` or on boot.
 - `MONGO_PUBLIC_URL` (TCP proxy) stays **off**.
 

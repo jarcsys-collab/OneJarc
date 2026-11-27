@@ -14,9 +14,11 @@
     "dev": "cd ../.. && tsx watch apps/server/src/index.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
     "@azure/msal-node": "^7.2.3",
     "express": "^5.3.0",
     "express-session": "^1.19.0",
+    "mongodb": "^7.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -24,6 +26,7 @@
     "@types/express-session": "^1.19.0",
     "@types/node": "^24.19.2",
     "@types/supertest": "^7.2.1",
+    "mongodb-memory-server-core": "^11.4.0",
     "supertest": "^7.3.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

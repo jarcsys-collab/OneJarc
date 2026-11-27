@@ -1,8 +1,7 @@
 // OneJarc Delete Tool helper.
-// Same-origin server path; the server forwards to the n8n URL in N8N_URL_DELETE_TOOL
-// and answers 501 "This action is not connected to n8n yet." until it is set (see PATCHES.md).
+// Same-origin server path; the server deletes the tool in MongoDB (see PATCHES.md).
 import { apiFetch } from "./api-fetch.js";
-const DELETE_TOOL_PATH = "/api/n8n/delete-tool";
+const DELETE_TOOL_PATH = "/api/tools/delete";
 
 export async function submitDeleteTool(toolId, fetchImpl = fetch) {
   let response;

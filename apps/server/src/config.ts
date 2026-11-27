@@ -1,7 +1,6 @@
 import path from "node:path";
 import { z } from "zod";
 import { isLogLevel, type LogLevel } from "./logger.js";
-import { N8N_ACTIONS } from "./n8n-actions.js";
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -33,14 +32,15 @@ export interface Config {
     clientSecret: string;
   };
   adminObjectIds: ReadonlySet<string>; // lower-case
-  n8nTimeoutMs: number;
-  /** Raw env values keyed by env var name (N8N_URL_*). May be empty / PASTE_ placeholders. */
-  n8nUrls: Readonly<Record<string, string>>;
-  pbi: {
-    mode: "n8n" | "server";
-    tenantId: string;
-    clientId: string;
-    clientSecret: string;
+  /** MongoDB connection string. null = in-memory stores (local development and tests only). */
+  mongodbUri: string | null;
+  mongodbDb: string;
+  chat: {
+    /** null = the chat answers "coming soon". */
+    anthropicApiKey: string | null;
+    model: string;
+    /** Messages per signed-in user per minute. */
+    ratePerMinute: number;
   };
   logLevel: LogLevel;
   buildId: string;
@@ -68,11 +68,11 @@ const envSchema = z.object({
   ENTRA_CLIENT_ID: opt,
   ENTRA_CLIENT_SECRET: opt,
   ADMIN_OBJECT_IDS: opt,
-  N8N_TIMEOUT_MS: opt,
-  PBI_EMBED_MODE: opt,
-  PBI_TENANT_ID: opt,
-  PBI_CLIENT_ID: opt,
-  PBI_CLIENT_SECRET: opt,
+  MONGODB_URI: opt,
+  MONGODB_DB: opt,
+  ANTHROPIC_API_KEY: opt,
+  CHAT_MODEL: opt,
+  CHAT_RATE_PER_MINUTE: opt,
   LOG_LEVEL: opt,
   RAILWAY_GIT_COMMIT_SHA: opt,
   DEV_AUTH_BYPASS_OID: opt,
@@ -153,11 +153,14 @@ export function loadConfig(env: Env = process.env, opts: { cwd?: string; now?: n
   if (!cloudInstance.endsWith("/")) cloudInstance += "/";
 
   // --- misc ---
-  const pbiMode = (e.PBI_EMBED_MODE ?? "n8n").toLowerCase();
-  if (pbiMode !== "n8n" && pbiMode !== "server") problems.push(`PBI_EMBED_MODE must be "n8n" or "server" (got "${e.PBI_EMBED_MODE}")`);
+  const nodeEnv = e.NODE_ENV ?? "development";
+  if (!e.MONGODB_URI && nodeEnv === "production") missing.push("MONGODB_URI");
+  if (e.MONGODB_URI && !/^mongodb(\+srv)?:\/\//.test(e.MONGODB_URI)) {
+    problems.push("MONGODB_URI must start with mongodb:// or mongodb+srv://");
+  }
+  const chatRate = positiveNumber(e.CHAT_RATE_PER_MINUTE, "CHAT_RATE_PER_MINUTE", 10, problems);
   const logLevel = (e.LOG_LEVEL ?? "info").toLowerCase();
   if (!isLogLevel(logLevel)) problems.push(`LOG_LEVEL must be one of debug, info, warn, error, silent (got "${e.LOG_LEVEL}")`);
-  const n8nTimeoutMs = positiveNumber(e.N8N_TIMEOUT_MS, "N8N_TIMEOUT_MS", 60_000, problems);
 
   let port = 3000;
   if (e.PORT !== undefined) {
@@ -174,11 +177,6 @@ export function loadConfig(env: Env = process.env, opts: { cwd?: string; now?: n
     throw new ConfigError(lines.join("\n"));
   }
 
-  const n8nUrls: Record<string, string> = {};
-  for (const action of Object.values(N8N_ACTIONS)) {
-    n8nUrls[action.envVar] = (env[action.envVar] ?? "").trim();
-  }
-
   const adminObjectIds = new Set(
     (e.ADMIN_OBJECT_IDS ?? "")
       .split(",")
@@ -192,7 +190,7 @@ export function loadConfig(env: Env = process.env, opts: { cwd?: string; now?: n
 
   return {
     port,
-    nodeEnv: e.NODE_ENV ?? "development",
+    nodeEnv,
     appBaseUrl,
     redirectUri: `${appBaseUrl}/auth/callback`,
     secureCookies: appUrl?.protocol === "https:",
@@ -202,27 +200,15 @@ export function loadConfig(env: Env = process.env, opts: { cwd?: string; now?: n
     sessionMaxAgeMs: Math.round(sessionHours * 3_600_000),
     entra: { cloudInstance, tenantId, clientId, clientSecret },
     adminObjectIds,
-    n8nTimeoutMs,
-    n8nUrls,
-    pbi: {
-      mode: pbiMode as "n8n" | "server",
-      tenantId: e.PBI_TENANT_ID ?? tenantId,
-      clientId: e.PBI_CLIENT_ID ?? clientId,
-      clientSecret: e.PBI_CLIENT_SECRET ?? clientSecret,
+    mongodbUri: e.MONGODB_URI ?? null,
+    mongodbDb: e.MONGODB_DB ?? "onejarc",
+    chat: {
+      anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
+      model: e.CHAT_MODEL ?? "claude-opus-5-5",
+      ratePerMinute: Math.floor(chatRate),
     },
     logLevel: logLevel as LogLevel,
     buildId: e.RAILWAY_GIT_COMMIT_SHA ? e.RAILWAY_GIT_COMMIT_SHA.slice(0, 12) : `dev-${now}`,
     devAuthBypass,
   };
-}
-
-/** True when an N8N_URL_* value is usable (set, not a PASTE_ placeholder, absolute http(s) URL). */
-export function connectedUrl(raw: string | undefined): string | null {
-  if (!raw || raw.startsWith("PASTE_")) return null;
-  try {
-    const u = new URL(raw);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : null;
-  } catch {
-    return null;
-  }
 }

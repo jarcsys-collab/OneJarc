@@ -7,19 +7,24 @@ import { createAuthRouter, SESSION_COOKIE } from "./auth/routes.js";
 import { createMsalClient, type MsalAuthClient } from "./auth/msal.js";
 import { requireApiAuth, requirePageAuth } from "./auth/middleware.js";
 import { createMeRouter } from "./api/me.js";
-import { createN8nRouter } from "./api/n8n.js";
-import { createPowerBiRouter, type PbiAppClient } from "./api/powerbi.js";
-import type { FetchLike } from "./api/n8n-client.js";
+import { createToolsRouter } from "./api/tools.js";
+import { createChatRouter } from "./api/chat.js";
+import { MemoryToolRepository, type ToolRepository } from "./catalog/tool-repository.js";
+import { AnthropicChatProvider, ComingSoonChatProvider, type ChatProvider } from "./chat/provider.js";
 import { createStaticRouter } from "./static.js";
 
 export interface AppDeps {
   logger: Logger;
   /** Injected in tests; created lazily from config otherwise. */
   msalClient?: MsalAuthClient;
-  /** Used for every outbound call (n8n, Power BI). Defaults to global fetch. */
-  fetch?: FetchLike;
-  pbiClient?: PbiAppClient;
+  /** Defaults to an in-memory store (local development and tests). */
   sessionStore?: SessionStore;
+  /** Defaults to an in-memory catalog (local development and tests). */
+  tools?: ToolRepository;
+  /** Defaults to Claude when ANTHROPIC_API_KEY is set, otherwise "coming soon". */
+  chatProvider?: ChatProvider;
+  /** Database check for /health. Omitted when no database is configured. */
+  healthCheck?: () => Promise<boolean>;
 }
 
 export interface CreatedApp {
@@ -30,7 +35,12 @@ export interface CreatedApp {
 
 export function createApp(config: Config, deps: AppDeps): CreatedApp {
   const { logger } = deps;
-  const fetchImpl: FetchLike = deps.fetch ?? ((input, init) => fetch(input, init));
+  const tools = deps.tools ?? new MemoryToolRepository();
+  const chatProvider =
+    deps.chatProvider ??
+    (config.chat.anthropicApiKey
+      ? new AnthropicChatProvider({ apiKey: config.chat.anthropicApiKey, model: config.chat.model, logger })
+      : new ComingSoonChatProvider());
   const ownStore = deps.sessionStore ? null : new MemorySessionStore();
   const store = deps.sessionStore ?? ownStore!;
 
@@ -64,9 +74,16 @@ export function createApp(config: Config, deps: AppDeps): CreatedApp {
     next();
   });
 
-  // 2. Public health check (no session, no dependencies).
-  app.get("/health", (_req, res) => {
-    res.set("Cache-Control", "no-store").json({ ok: true, build: config.buildId });
+  // 2. Public health check (no session).
+  // With a database configured, /health also pings it and answers 503 when it is down.
+  app.get("/health", async (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    if (!deps.healthCheck) {
+      res.json({ ok: true, build: config.buildId });
+      return;
+    }
+    const dbUp = await deps.healthCheck().catch(() => false);
+    res.status(dbUp ? 200 : 503).json({ ok: dbUp, build: config.buildId, db: dbUp ? "ok" : "down" });
   });
 
   // 3. Old GitHub Pages path.
@@ -104,8 +121,8 @@ export function createApp(config: Config, deps: AppDeps): CreatedApp {
   api.use(requireApiAuth);
   api.use(express.json({ limit: "10mb" }));
   api.use(createMeRouter(config));
-  api.use("/n8n", createN8nRouter({ config, logger, fetch: fetchImpl }));
-  api.use("/powerbi", createPowerBiRouter({ config, logger, fetch: fetchImpl, pbiClient: deps.pbiClient }));
+  api.use("/tools", createToolsRouter({ config, logger, tools }));
+  api.use("/chat", createChatRouter({ config, logger, tools, provider: chatProvider }));
   api.use((_req, res) => {
     res.status(404).json({ success: false, error: "Not found" });
   });

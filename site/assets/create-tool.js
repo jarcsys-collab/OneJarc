@@ -1,8 +1,8 @@
 import { TOOL_INPUTS, BACKEND_FIELDS, getToolInput } from "./tool-variables.js";
 import { assertToolConfiguration } from "./tool-categories.js";
 import { apiFetch } from "./api-fetch.js";
-// Same-origin server path; the server forwards to n8n (see PATCHES.md).
-const CREATE_TOOL_PATH = "/api/n8n/create-tool";
+// Same-origin server path; the server stores the tool in MongoDB (see PATCHES.md).
+const CREATE_TOOL_PATH = "/api/tools/create";
 export function toolPayload(definition) {
   assertToolConfiguration(definition);
   return {
@@ -20,8 +20,9 @@ export function toolPayload(definition) {
   };
 }
 
-export async function submitNewTool(definition, settings, fetchImpl = fetch) {
-  const payload = toolPayload(definition);
+// publish: true = "Save & publish" (live at once), false = "Save draft" (admins only).
+export async function submitNewTool(definition, settings, fetchImpl = fetch, publish = true) {
+  const payload = { ...toolPayload(definition), publish: publish === true };
   let response;
   try {
     response = await apiFetch(settings?.createToolWebhookUrl || CREATE_TOOL_PATH, {

@@ -14,9 +14,7 @@ Portals change their menus often. If a button isn't where this guide says, use t
   - You need at least the **Application Developer** role. Some tenants let ordinary users register apps.
   - For admin consent and "Assignment required", you need **Cloud Application Administrator** or **Application Administrator**. Being the app's owner covers most other settings.
 - [ ] **A Railway account** (https://railway.com), signed in with GitHub.
-- [ ] **Access to the Power BI workspaces** that hold the OneJarc reports. This is only needed for option 5b.
-- [ ] **The n8n Production webhook URLs** for these 4 workflows: **chat**, **get-tools**, **create-tool**, **get-tool-creds**.
-  - They are the same URLs that used to be in `site/onejarc-config.json`, which you can find in git history.
+- [ ] **Optional: an Anthropic API key** for the chat assistant (step 6). Without it the chat answers "coming soon".
 - [ ] **Node.js 24 or later and pnpm 10** installed locally, for step 3.
 
 ---
@@ -48,8 +46,8 @@ Go to https://entra.microsoft.com and sign in. If you belong to several tenants,
    |---|---|
    | `http://localhost:3000/auth/callback` | Already added in 1.1 |
    | `http://localhost:3000/auth/signed-out` | Add now |
-   | `https://<your-railway-domain>/auth/callback` | After step 4.6, once you have the domain |
-   | `https://<your-railway-domain>/auth/signed-out` | After step 4.6, once you have the domain |
+   | `https://<your-railway-domain>/auth/callback` | After step 4.4, once you have the domain |
+   | `https://<your-railway-domain>/auth/signed-out` | After step 4.4, once you have the domain |
 
    - The `/auth/signed-out` addresses are where Microsoft sends you after logout. They **must also be registered as redirect URIs**, otherwise logout ends on a Microsoft error page.
    - `http://` is accepted only for `localhost`. Every other address must be `https://`.
@@ -121,14 +119,10 @@ Admin rights in OneJarc don't come from Entra. They come from `ADMIN_OBJECT_IDS`
    ENTRA_CLIENT_SECRET=<client-secret-value>
    SESSION_SECRET=<output of the command above>
    ADMIN_OBJECT_IDS=<your-own-oid>
-   N8N_URL_CHAT=<n8n production URL for chat>
-   N8N_URL_GET_TOOLS=<n8n production URL for get-tools>
-   N8N_URL_CREATE_TOOL=<n8n production URL for create-tool>
-   N8N_URL_GET_TOOL_CREDS=<n8n production URL for get-tool-creds>
    ```
    - Leave everything else at its default.
-   - `PBI_EMBED_MODE` stays `n8n` unless you did step 5b.
-   - Leave the other 9 `N8N_URL_*` empty. Those buttons will say "not connected to n8n yet".
+   - `MONGODB_URI` empty means the catalog and sessions live in memory and are lost when the server stops. The catalog starts with 4 example tools. To keep data, run a local MongoDB and set `MONGODB_URI=mongodb://127.0.0.1:27017`.
+   - `ANTHROPIC_API_KEY` empty means the chat answers "coming soon".
 4. Install, build and start:
    ```
    pnpm install
@@ -174,7 +168,7 @@ Admin rights in OneJarc don't come from Entra. They come from `ADMIN_OBJECT_IDS`
 1. Go to **Settings** → **Deploy**:
    - **Healthcheck Path:** `/health`.
    - **Healthcheck Timeout:** `60` seconds is plenty. The default is 300.
-   - **Replicas:** `1`. Keep it at **exactly 1**, because sessions are stored in memory. Depending on the UI version, the setting is in **Deploy** or **Scale**.
+   - **Replicas:** `1`. Sessions and the catalog are in MongoDB, so more would work, but the chat rate limit is per replica. Depending on the UI version, the setting is in **Deploy** or **Scale**.
 2. If you don't see these fields, search the settings page for "Healthcheck" or "Replicas".
 
 ### 4.4 Public domain
@@ -183,7 +177,12 @@ Admin rights in OneJarc don't come from Entra. They come from `ADMIN_OBJECT_IDS`
    - If Railway asks for a port, leave the suggested one. The server listens on Railway's `PORT`.
 2. Copy the domain, for example `<something>.up.railway.app`. This is `<your-railway-domain>`.
 
-### 4.5 Variables
+### 4.5 MongoDB
+
+1. On the project canvas (with `staging` selected): **+ Create** → **Database** → **MongoDB**. Railway names the service `MongoDB`.
+2. Leave its public TCP proxy **off**. The app reaches it over Railway's private network (`mongodb.railway.internal`), which works only at runtime, not during the build.
+
+### 4.6 Variables
 
 1. Open the service's **Variables** tab → **Raw Editor**.
 2. Paste the list below with your real values, then click **Update Variables** (or **Save**):
@@ -195,16 +194,14 @@ Admin rights in OneJarc don't come from Entra. They come from `ADMIN_OBJECT_IDS`
    ENTRA_CLIENT_SECRET=<client-secret-value>
    SESSION_SECRET=<a NEW random value, generated with the command in step 3>
    ADMIN_OBJECT_IDS=<oid-admin-1>,<oid-admin-2>
-   PBI_EMBED_MODE=n8n
-   N8N_URL_CHAT=<n8n production URL for chat>
-   N8N_URL_GET_TOOLS=<n8n production URL for get-tools>
-   N8N_URL_CREATE_TOOL=<n8n production URL for create-tool>
-   N8N_URL_GET_TOOL_CREDS=<n8n production URL for get-tool-creds>
+   MONGODB_URI=${{MongoDB.MONGO_URL}}
+   ANTHROPIC_API_KEY=<optional: your Anthropic API key>
    ```
+   - `MONGODB_URI` is a **reference** to the MongoDB service, typed exactly as shown. Railway fills in the real connection string. The server refuses to start in production without it.
    - `APP_BASE_URL` must be `https://` plus the generated domain, with **no trailing slash**.
    - Don't add `PORT`; Railway sets it.
    - Use a different `SESSION_SECRET` from your local one.
-3. **Seal the secrets.** For each of `SESSION_SECRET`, `ENTRA_CLIENT_SECRET`, and `PBI_CLIENT_SECRET` (only if you set it, see step 5b):
+3. **Seal the secrets.** For each of `SESSION_SECRET`, `ENTRA_CLIENT_SECRET` and `ANTHROPIC_API_KEY` (leave `MONGODB_URI` as a reference):
    - Click the variable's **⋮** (3-dot) menu → **Seal**.
    - **What sealed means:**
      - The app still receives the value.
@@ -214,75 +211,45 @@ Admin rights in OneJarc don't come from Entra. They come from `ADMIN_OBJECT_IDS`
      - To change a sealed value, use **⋮** → **Edit**. The Raw Editor can't update sealed variables.
 4. **Apply the changes.** Variable and setting changes are *staged*. A banner appears on the canvas; click **Details** to review, then click **Deploy**.
 
-### 4.6 Tell Entra about the Railway domain
+### 4.7 Tell Entra about the Railway domain
 
 - [ ] Go back to **step 1.2** and add `https://<your-railway-domain>/auth/callback` and `https://<your-railway-domain>/auth/signed-out`. Click **Save**.
 
-### 4.7 Check the deploy
+### 4.8 Check the deploy
 
 1. Open the service → **Deployments** tab, then the latest deployment → **View logs** (Build and Deploy logs).
    - The deployment becomes **Active** only after `/health` answers.
    - If the healthcheck fails, the old deployment (if any) keeps serving.
-2. Open `https://<your-railway-domain>/health`. You should see `{"ok":true,"build":"..."}`.
+2. Open `https://<your-railway-domain>/health`. You should see `{"ok":true,"build":"...","db":"ok"}`. If MongoDB is down it answers 503 with `"db":"down"`.
 3. Open `https://<your-railway-domain>/` and sign in.
 
-### 4.8 Good to know
+### 4.9 Good to know
 
-- **Each redeploy signs everyone out.** Sessions are kept in memory for now, so this is expected. Users just sign in again.
+- **Sessions survive redeploys.** They are stored in MongoDB (`sessions` collection, removed automatically when they expire).
+- **First start seeds the catalog** with 3 example tools and 1 draft Power BI example, once, if the `tools` collection is empty. Edit or delete them in the admin console.
 - **Railway does not read `.railway/railway.ts` automatically.** The dashboard settings above are all you need.
   - Optional, from your machine with the Railway CLI: `railway link` (pick the project, `staging` and the service), then `railway config plan` to preview the file's settings and `railway config apply` to apply them.
 - Pushes to `railway-entra` redeploy `staging` automatically.
 
 ---
 
-## 5. Power BI access — choose one (`PBI_EMBED_MODE`)
+## 5. Power BI reports
 
-### 5a. `n8n` (default — nothing to change)
+Reports open with **each person's own Power BI sign-in** (the report's secure-embed URL in the OneJarc viewer). There is nothing to set up on the server. Each viewer needs access to the report in Power BI and a license that allows it.
 
-- [ ] Leave `PBI_EMBED_MODE=n8n`, or unset. The n8n **get-tool-creds** workflow keeps generating Power BI embed tokens exactly as it does today.
-
-### 5b. `server` (the Railway server creates embed tokens with a service principal)
-
-**Roles needed:**
-- **Fabric Administrator** (Power BI admin) to change tenant settings.
-- Entra **Groups Administrator**, or a user who is allowed to create groups, for the security group.
-- **Admin** of each Power BI workspace, to add the app.
-
-1. **Security group (Entra):**
-   1. Go to **Entra ID** → **Groups** → **New group**.
-   2. **Group type:** **Security**. Name: `sg-onejarc-powerbi`. Click **Create**.
-   3. Open the group → **Members** → **Add members**, search for **OneJarc (test)** (the app), and add it.
-2. **Tenant settings (Fabric/Power BI):**
-   1. Go to https://app.powerbi.com.
-   2. Open the tenant settings:
-      - Newer UI: **⚙ Settings** → **Admin portal** → **Tenant settings**.
-      - If you see the OneLake catalog: **Govern** → **Configurations** → **Tenant settings**.
-   3. Scroll to **Developer settings** (or search "service principal") and turn on these two, each with **Apply to: Specific security groups** → `sg-onejarc-powerbi`:
-      - **Embed content in apps**.
-      - **Service principals can call Fabric public APIs**. The older name is "Allow service principals to use Power BI APIs".
-   4. Click **Apply**. It can take up to about 15 minutes to take effect.
-3. **Each workspace that holds OneJarc reports:**
-   1. In the workspace list, open the workspace's **⋯ (More)** menu → **Workspace access** (or **Manage access** inside the workspace).
-   2. Add **OneJarc (test)** or the group `sg-onejarc-powerbi`, with role **Member**. Click **Add**.
-   3. "My workspace" doesn't work with service principals.
-4. **Capacity:**
-   - For production, the workspace must be on a **Fabric / Premium / Embedded capacity**. Check **Workspace settings** → **License info**.
-   - On Pro-only workspaces, service-principal embed tokens are for development and testing only.
-5. **Railway variables (staging):** set `PBI_EMBED_MODE=server`, then **Deploy**.
-   - `PBI_CLIENT_ID`, `PBI_CLIENT_SECRET` and `PBI_TENANT_ID` default to the `ENTRA_*` values, so you don't need to set them for now.
-   - **Later improvement:** Microsoft recommends a **separate** app registration for the Power BI service principal, **with no API permissions**. When you create one, set `PBI_CLIENT_ID` and `PBI_CLIENT_SECRET` (sealed), and put that app in the security group instead.
+To add a report as an admin:
+1. In Power BI, open the report and copy its URL from the address bar: `https://app.powerbi.com/groups/<workspace-id>/reports/<report-id>/...`.
+2. In the OneJarc admin console, create a tool with category **Power BI**. Paste the URL as the application URL, enter the workspace ID, and choose the roles that may open it.
 
 ---
 
-## 6. n8n
+## 6. Chat assistant (optional)
 
-- [ ] **This round, the only task is copying the 4 Production URLs** (chat, get-tools, create-tool, get-tool-creds) into `.env` and Railway.
-  - In n8n: open the workflow, open its **Webhook** node, select the **Production URL** tab, and copy it. The workflow must be **active / published**.
-- **Later:** the 9 tool actions need new n8n workflows: **delete, edit, duplicate, publish, unpublish, enable, disable, archive, restore**.
-  - When each one exists, set its Railway variable and click **Deploy**.
-  - The variables are `N8N_URL_DELETE_TOOL`, `N8N_URL_EDIT_TOOL`, `N8N_URL_DUPLICATE_TOOL`, `N8N_URL_PUBLISH_TOOL`, `N8N_URL_UNPUBLISH_TOOL`, `N8N_URL_ENABLE_TOOL`, `N8N_URL_DISABLE_TOOL`, `N8N_URL_ARCHIVE_TOOL` and `N8N_URL_RESTORE_TOOL`.
-  - Until then, those buttons answer "This action is not connected to n8n yet."
-- The old **onejarc-login** workflow is **no longer used**, because sign-in is now Entra. Leave it alone for now.
+The chat recommends tools from the catalog, using Claude.
+1. Create an API key at https://platform.claude.com → **Settings** → **API keys**.
+2. In Railway, set `ANTHROPIC_API_KEY` (seal it), then **Deploy**. Without it, the chat answers "The OneJarc assistant is coming soon."
+3. Optional: `CHAT_MODEL` (default `claude-opus-5-5`) and `CHAT_RATE_PER_MINUTE` (default 10 messages per user per minute).
+- What is sent to Anthropic: the user's message and the names, categories and descriptions of the live tools. No names, emails or ids.
 
 ---
 

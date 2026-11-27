@@ -1,6 +1,6 @@
 // OneJarc same-origin API transport (see PATCHES.md).
-// Every n8n / Power BI call goes through the OneJarc server, which holds the
-// Microsoft Entra session cookie and the real webhook URLs. No n8n URL lives here.
+// Every catalog, chat and launch call goes to the OneJarc server, which holds the
+// Microsoft Entra session cookie.
 
 export const SESSION_EXPIRED_MESSAGE = "Your session expired. Sign in again.";
 

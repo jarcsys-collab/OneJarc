@@ -35,10 +35,11 @@ describe("public endpoints and the auth gate", () => {
     expect(res.body).toEqual({ success: false, error: "Not signed in" });
   });
 
-  it("unauthenticated /api/n8n/chat is 401 JSON", async () => {
-    const res = await request(app).post("/api/n8n/chat").send({ message: "hi" });
-    expect(res.status).toBe(401);
-    expect(res.body).toEqual({ success: false, error: "Not signed in" });
+  it("unauthenticated /api/chat and /api/tools are 401 JSON", async () => {
+    for (const res of [await request(app).post("/api/chat").send({ message: "hi" }), await request(app).get("/api/tools")]) {
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ success: false, error: "Not signed in" });
+    }
   });
 
   it("/auth/signed-out is public HTML", async () => {
@@ -113,7 +114,7 @@ describe("dev auth bypass + /api/me", () => {
   it("invalid JSON body is 400 JSON", async () => {
     const app = buildApp(makeConfig({ DEV_AUTH_BYPASS_OID: USER_OID }));
     const agent = await signedInAgent(app);
-    const res = await agent.post("/api/n8n/chat").set("Content-Type", "application/json").send("{bad");
+    const res = await agent.post("/api/chat").set("Content-Type", "application/json").send("{bad");
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ success: false, error: "Invalid JSON body" });
   });
@@ -126,13 +127,27 @@ describe("request logging", () => {
     const logger = createLogger("info", (line) => lines.push(line));
     const app = buildApp(makeConfig({ DEV_AUTH_BYPASS_OID: USER_OID }), { logger });
     const agent = await signedInAgent(app);
-    await agent.post("/api/n8n/chat?x=1").send({ message: "secret message" });
+    await agent.post("/api/chat?x=1").send({ message: "secret message" });
     const entries = lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((e) => e.msg === "request");
-    const chat = entries.find((e) => e.path === "/api/n8n/chat")!;
-    expect(chat).toMatchObject({ method: "POST", status: 501, oid: USER_OID });
+    const chat = entries.find((e) => e.path === "/api/chat")!;
+    expect(chat).toMatchObject({ method: "POST", status: 200, oid: USER_OID });
     expect(typeof chat.ms).toBe("number");
     const all = lines.join("\n");
     expect(all).not.toContain("secret message");
     expect(all).not.toContain("onejarc.sid");
+  });
+});
+
+describe("/health with a database check", () => {
+  it("answers 200 with db ok, and 503 when the database is down", async () => {
+    let up = true;
+    const app = buildApp(makeConfig(), { healthCheck: async () => up });
+    const okRes = await request(app).get("/health");
+    expect(okRes.status).toBe(200);
+    expect(okRes.body).toEqual({ ok: true, build: "abcdef012345", db: "ok" });
+    up = false;
+    const down = await request(app).get("/health");
+    expect(down.status).toBe(503);
+    expect(down.body).toEqual({ ok: false, build: "abcdef012345", db: "down" });
   });
 });

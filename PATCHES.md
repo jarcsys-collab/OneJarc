@@ -1,13 +1,44 @@
 # PATCHES.md: hand edits to the built frontend (`site/`)
 
-The OneJarc frontend in `site/` is a **built** Vite bundle (`site/assets/index-D3Sf9OYN.js`, about 37k unminified lines with `//#region src/...` markers) plus 17 hand-written ES modules in `site/assets/*.js`. The TypeScript source is not in this repository, so nothing can be rebuilt. To move sign-in to Microsoft Entra ID and send every n8n call through the same-origin OneJarc server (`apps/server`), the built files were **edited by hand, minimally**.
+The OneJarc frontend in `site/` is a **built** Vite bundle (`site/assets/index-D3Sf9OYN.js`, about 37k unminified lines with `//#region src/...` markers) plus 17 hand-written ES modules in `site/assets/*.js`. The TypeScript source is not in this repository, so nothing can be rebuilt. To move sign-in to Microsoft Entra ID and send every backend call to the same-origin OneJarc server (`apps/server`), the built files were **edited by hand, minimally**. The server now implements the catalog, chat and launch natively on MongoDB and the Anthropic API; n8n is no longer used (round 2, see **R1-R6** below).
 
 - **Baseline:** commit `5f0dd20`. Every "Line" below is the line number **at 5f0dd20** (before any edit), so you can find the spot with `git show 5f0dd20:site/assets/index-D3Sf9OYN.js`.
 - **These edits must be ported to the TypeScript source** when it is recovered or rebuilt (PLAN.md Phase 0). After that, regenerate the bundle and delete this file.
 - Bundle edits were applied from the bottom of the file upward. Where an edit adds or removes lines, later line numbers in the patched file shift by a few lines.
-- Server contract the frontend now relies on: `GET /api/me`, `GET /auth/login?returnTo=`, `GET /auth/logout`, `POST|GET /api/n8n/<action>`, `POST /api/powerbi/embed-token`, a 401 JSON answer (never a redirect) for `/api/*`, the `X-OneJarc-Build` response header, and `<base href="/">` + `<meta name="onejarc-build">` injected into `index.html`.
+- Server contract the frontend now relies on: `GET /api/me`, `GET /auth/login?returnTo=`, `GET /auth/logout`, `GET /api/tools`, `POST /api/tools/<create|launch|delete|edit|duplicate|publish|unpublish|enable|disable|archive|restore>`, `POST /api/chat`, a 401 JSON answer (never a redirect) for `/api/*`, the `X-OneJarc-Build` response header, and `<base href="/">` + `<meta name="onejarc-build">` injected into `index.html`.
 
 Legend: **B** = `site/assets/index-D3Sf9OYN.js`.
+
+---
+
+## Round 2 (2026-11-27): n8n removed
+
+The server now answers every call itself (MongoDB catalog, Claude chat, Power BI with the viewer's own sign-in). The frontend keeps its request and response shapes; only paths and the items below changed. The path changes are already reflected in M1-M9 and the config table.
+
+### R1. Bundle: create sends the "Save draft" / "Save & publish" choice
+- **Region:** `//#region src/models/catalog-data-source.ts`, `createLocalCatalogDataSource` → `execute`
+- **Reason:** `submitNewTool` dropped `command.publish`, so "Save draft" on a new tool made it live. It now passes it (see R4). A create without the flag still goes live, as before.
+
+BEFORE `if(isCreate) await submitNewTool(command.definition,backendConfig);`
+AFTER `if(isCreate) await submitNewTool(command.definition,backendConfig,fetch,command.publish === true);`
+
+### R2. Bundle: n8n wording and the dead staging URL
+- **Regions:** `backend-config.ts`, `chat-service.ts`, `catalog-api-service.ts`, the admin delete dialog, the hub search panel
+- **Reason:** No n8n text or host remains in the bundle.
+  - The `staging` profile's unused `apiBaseUrl` (formerly an n8n host on onrender.com) and the matching check in `validateBackendConfig` are now `https://onejarc.invalid/api`. It is still never fetched: chat uses `chatWebhookUrl`.
+  - "n8n request failed: " → "Assistant request failed: "; "n8n workflow response" → "Assistant reply" (heading and aria-label).
+  - Delete dialog: "...through the configured n8n webhook..." → "Permanently delete this tool from the catalog. This cannot be undone."
+  - Two comments and the `validateChatWebhookUrl` error example (`/api/chat`).
+
+### R3. Paths in the sibling modules and config
+`/api/tools` → `/api/tools`, `/api/tools/create` → `/api/tools/create`, `/api/tools/<action>` → `/api/tools/<action>`, `/api/tools/launch` → `/api/tools/launch`, `/api/chat` → `/api/chat`. All are served `no-cache`/`no-store`, so browsers pick up the new files on the next load.
+
+### R4. `create-tool.js`: `submitNewTool(definition, settings, fetchImpl = fetch, publish = true)` adds `publish` to the payload.
+
+### R5. `launch-tool.js`: no embed tokens; follows the tool's open behaviour
+The server answers `{ authorized, category, toolName, targetUrl, openBehavior }`. Power BI reports come back as their secure-embed URL (`https://app.powerbi.com/reportEmbed?reportId=…&groupId=…&autoAuth=true&ctid=…`), which opens in the viewer with the user's own Power BI sign-in. The Power BI JavaScript SDK path, `/api/powerbi/embed-token` and the token-refresh timers are removed. `openBehavior` is now honoured: `new-tab` opens a new tab (the viewer if the pop-up is blocked), `same-tab` navigates this tab, anything else uses the viewer.
+
+### R6. `index.html`: the `powerbi-client` script from jsDelivr is removed (nothing uses it any more).
 
 ---
 
@@ -70,7 +101,7 @@ async signOut() {
 ### B2. `validateChatWebhookUrl`: accept same-origin paths
 - **Region:** `//#region src/models/backend-config.ts`
 - **Line:** B:10075-10079
-- **Reason:** The config now holds relative paths such as `/api/n8n/chat`. The old check required an absolute `https:` URL, so page load failed. A URL is now accepted if it is same-origin (any protocol, so `http://localhost` works) or `https:`. The checks for credentials, query string, fragment, root path and length stay. The function still returns `url.href`, the absolute URL. Callers checked: `parseRuntimeConfig` (all 5 URLs), `validatePlannedConnections` (empty strings are skipped by `if (value[key])`), and `validateBackendConfig` B:10051 (it receives the already-absolute href).
+- **Reason:** The config now holds relative paths such as `/api/chat`. The old check required an absolute `https:` URL, so page load failed. A URL is now accepted if it is same-origin (any protocol, so `http://localhost` works) or `https:`. The checks for credentials, query string, fragment, root path and length stay. The function still returns `url.href`, the absolute URL. Callers checked: `parseRuntimeConfig` (all 5 URLs), `validatePlannedConnections` (empty strings are skipped by `if (value[key])`), and `validateBackendConfig` B:10051 (it receives the already-absolute href).
 
 BEFORE
 ```js
@@ -86,13 +117,13 @@ const url = new URL(value, window.location.origin);
 if (typeof value !== "string" || value.length > 2048 || url.origin !== window.location.origin && url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname === "/") throw new Error();
 return url.href;
 } catch {
-	throw new Error("Use a same-origin path (e.g. /api/n8n/chat) or a complete HTTPS URL without credentials, query parameters, or fragments.");
+	throw new Error("Use a same-origin path (e.g. /api/chat) or a complete HTTPS URL without credentials, query parameters, or fragments.");
 ```
 
 ### B3. api-client: send the session cookie
 - **Region:** `//#region src/models/api-client.ts`, `createApiClient` → `request` fetch options
 - **Line:** B:10228
-- **Reason:** Chat (`POST /api/n8n/chat`) must carry the session cookie. A 401 already maps to `ApiError("UNAUTHORIZED")` and calls `dependencies.onUnauthorized` (B:10260). See B6 for wiring that callback to the chat client. `mode: "cors"` and `redirect: "error"` stay; both are harmless for same-origin requests.
+- **Reason:** Chat (`POST /api/chat`) must carry the session cookie. A 401 already maps to `ApiError("UNAUTHORIZED")` and calls `dependencies.onUnauthorized` (B:10260). See B6 for wiring that callback to the chat client. `mode: "cors"` and `redirect: "error"` stay; both are harmless for same-origin requests.
 
 BEFORE `credentials: "omit",` → AFTER `credentials: "same-origin",`
 
@@ -188,7 +219,7 @@ AFTER
 ### B8. Launch call site passes the tool id
 - **Region:** `//#region src/controllers/hub-controller.tsx` (`HubContent` → `openToolWorkspace`)
 - **Line:** B:35948-35952
-- **Reason:** The server works out the email and role from the session. The tool id is passed so `launch-tool.js` can request embed-token refreshes. `launchTool` still accepts the old `(name, email, role)` form (see M9).
+- **Reason:** The server works out the email and role from the session. The tool id is passed so the server can find the exact tool. `launchTool` still accepts the old `(name, email, role)` form (see M9).
 
 BEFORE
 ```js
@@ -219,7 +250,7 @@ BEFORE `loadRuntimeConfig(window.location.href).then(() => {`
 AFTER `loadRuntimeConfig(document.baseURI).then(() => {`
 
 ### Not changed (intentional)
-- B:10020 / B:10053: the dead `https://jarctech-ai-n8n-rnd.onrender.com/webhook` `apiBaseUrl` in the `staging` profile, which `validateBackendConfig` requires. It is never fetched, because chat uses `chatWebhookUrl`. Remove it in the rebuild.
+- B:10020 / B:10053: the dead `apiBaseUrl` in the `staging` profile, which `validateBackendConfig` requires (now `https://onejarc.invalid/api`, see R2). It is never fetched, because chat uses `chatWebhookUrl`. Remove it in the rebuild.
 - B:70: `fetchOpts.credentials = "omit"` belongs to Vite's modulepreload polyfill and applies only to `<link rel="modulepreload" crossorigin="anonymous">`, which this page does not use.
 - B:9945-9968 `DEMO_SESSION_KEY` / `createSessionStore`, B:10373 wiring, and the `signIn(username, password)` path in `use-auth.tsx`. All of it is unused or unreachable now.
 
@@ -232,7 +263,7 @@ AFTER `loadRuntimeConfig(document.baseURI).then(() => {`
 
 ### M1. `site/assets/get-tools.js`
 - **Line:** 1-2 (header plus import), 83-108 (`fetchToolCatalogSnapshot` transport)
-- **Reason:** Calls go through `apiFetch` with the cookie, and the error text no longer mentions CORS. The URL still comes from config (`getToolsWebhookUrl` = `/api/n8n/get-tools`). HTTP errors (401, 501, 502, 504) now show the server's `error` text before the "invalid JSON" check is reached.
+- **Reason:** Calls go through `apiFetch` with the cookie, and the error text no longer mentions CORS. The URL still comes from config (`getToolsWebhookUrl` = `/api/tools`). HTTP errors (401, 5xx) now show the server's `error` text before the "invalid JSON" check is reached.
 
 BEFORE
 ```js
@@ -255,8 +286,8 @@ if (body === null) { throw new Error("The get-tools webhook returned invalid JSO
 ```
 
 ### M2. `site/assets/create-tool.js`
-- **Line:** 2 (import plus `CREATE_TOOL_PATH = "/api/n8n/create-tool"`), 20-41 (`submitNewTool`)
-- **Reason:** Calls go through `apiFetch`. The URL is `settings.createToolWebhookUrl` (the config's `/api/n8n/create-tool`, now an absolute same-origin href), falling back to the constant. `toolPayload()` is unchanged.
+- **Line:** 2 (import plus `CREATE_TOOL_PATH = "/api/tools/create"`), 20-41 (`submitNewTool`)
+- **Reason:** Calls go through `apiFetch`. The URL is `settings.createToolWebhookUrl` (the config's `/api/tools/create`, now an absolute same-origin href), falling back to the constant. `toolPayload()` is unchanged.
 
 BEFORE
 ```js
@@ -277,7 +308,7 @@ if (response.ok && result === null) throw new Error('The webhook returned an inv
 
 ### M3. `site/assets/delete-tool.js`
 - **Line:** 1-23
-- **Reason:** The `PASTE_` placeholder constant and its guard are replaced by the server path `/api/n8n/delete-tool`. Until `N8N_URL_DELETE_TOOL` is set, the server answers 501 `{"success":false,"error":"This action is not connected to n8n yet."}`, and that text is thrown as an `Error`. The admin UI (`AdminWorkspace.act`, B:32363) shows `failure.message`. Nothing is removed locally, because the webhook runs before the local write.
+- **Reason:** The `PASTE_` placeholder constant and its guard are replaced by the server path `/api/tools/delete`. A server `{"success":false,"error":"..."}` answer (400, 403, 404) is thrown as an `Error`. The admin UI (`AdminWorkspace.act`, B:32363) shows `failure.message`. Nothing is removed locally, because the webhook runs before the local write.
 
 BEFORE
 ```js
@@ -290,7 +321,7 @@ let result; try { result = await response.json(); } catch { throw new Error("Del
 AFTER
 ```js
 import { apiFetch } from "./api-fetch.js";
-const DELETE_TOOL_PATH = "/api/n8n/delete-tool";
+const DELETE_TOOL_PATH = "/api/tools/delete";
 ...
 let response;
 try { response = await apiFetch(DELETE_TOOL_PATH, { method: "POST", body: { id: toolId }, fetchImpl }); }
@@ -301,7 +332,7 @@ if (response.ok && result === null) { throw new Error("Delete webhook returned a
 
 ### M4. `site/assets/tool-webhook-client.js` (shared by the 8 action adapters)
 - **Line:** 1-9
-- **Reason:** The `PASTE_` guard and the absolute-https check are replaced by a same-origin check. A URL must resolve to `window.location.origin`; an empty URL falls back to `/api/n8n/<action>-tool`. Calls go through `apiFetch`. The server's 501 or 403 `error` text is thrown as the `Error` message.
+- **Reason:** The `PASTE_` guard and the absolute-https check are replaced by a same-origin check. A URL must resolve to `window.location.origin`; an empty URL falls back to `/api/tools/<action>`. Calls go through `apiFetch`. The server's `error` text (400, 403, 404) is thrown as the `Error` message.
 
 BEFORE
 ```js
@@ -315,7 +346,7 @@ let result;try{result=await response.json()}catch{throw new Error('The '+action+
 AFTER
 ```js
 import { apiFetch } from './api-fetch.js';
-const target = new URL(url || '/api/n8n/' + action + '-tool', window.location.origin);
+const target = new URL(url || '/api/tools/' + action, window.location.origin);
 if(target.origin !== window.location.origin || target.username || target.password) throw new Error('Tool actions must use a same-origin OneJarc server path.');
 try { response = await apiFetch(target.pathname, {method:'POST', body:payload, fetchImpl}); }
 catch { throw new Error('Could not confirm ' + action + '. Check your connection. ...'); }
@@ -325,7 +356,7 @@ if(response.ok && result === null) throw new Error('The '+action+' webhook retur
 
 ### M5-M8. The 8 action adapters
 - **Files and lines:** `edit-tool.js:3-5`, `duplicate-tool.js:2-4`, `publish-tool.js:2-4`, `unpublish-tool.js:2-4`, `enable-tool.js:2-4`, `disable-tool.js:2-4`, `archive-tool.js:2-4`, `restore-tool.js:2-4`
-- **Reason:** The placeholder constants become server paths. The server answers 501 until the matching `N8N_URL_<NAME>_TOOL` is set.
+- **Reason:** The placeholder constants become server paths; the server writes the change to MongoDB.
 
 BEFORE (example: archive)
 ```js
@@ -335,83 +366,57 @@ export const WEBHOOK_URL = "PASTE_YOUR_ARCHIVE_WEBHOOK_HERE";
 ```
 AFTER
 ```js
-// Same-origin OneJarc server path; the server forwards to the n8n URL in
-// N8N_URL_ARCHIVE_TOOL and answers 501 until it is set (see PATCHES.md).
-export const WEBHOOK_URL = "/api/n8n/archive-tool";
+// Same-origin OneJarc server path; the server writes the change to MongoDB (see PATCHES.md).
+export const WEBHOOK_URL = "/api/tools/archive";
 ```
 
 ### M9. `site/assets/launch-tool.js`
-- **Lines:** 1-23 (header, `launchTool` request), 32 (Power BI call passes the tool id), new block before `createViewerShell` (line 50), 99 (Close button), 115 and 151 (`showPowerBIReport`)
-- **Reason:**
-  - The hardcoded n8n URL is replaced by `apiFetch("/api/n8n/get-tool-creds", { method: "POST", body: { toolName, toolId } })`. The server adds `email` and `role` from the session.
-  - New signature `launchTool(toolName, { toolId })`. The old `launchTool(toolName, email, role[, toolId])` still works; email and role are ignored.
-  - Non-OK responses throw the server's `error` text, for example "Your session expired. Sign in again." The existing alert, rethrow and launch-message behaviour is kept, and so are the iframe viewer and the Power BI embed.
-  - The `report` returned by `powerbi.embed` is now kept and returned. A refresh is scheduled 5 minutes before `expiration` (or `tokenExpiration`). If the response has no expiry, it refreshes every 50 minutes, and never sooner than 10 seconds. A refresh is `POST /api/powerbi/embed-token { toolId, toolName }` followed by `report.setAccessToken(accessToken)`, then the next refresh is scheduled from the new `expiration`.
-  - A failed refresh is retried after 1 minute. A 401 stops refreshing.
-  - The timer is cleared when the viewer closes or another viewer opens (`createViewerShell`). A `visibilitychange` handler runs an overdue refresh as soon as the tab is visible again, because background tabs throttle timers.
+- **Reason:** The hardcoded webhook URL is replaced by `apiFetch("/api/tools/launch", { method: "POST", body: { toolName, toolId } })`; the server checks access from the session. New signature `launchTool(toolName, { toolId })`; the old `launchTool(toolName, email, role[, toolId])` still works (email and role are ignored). Non-OK responses throw the server's `error` text. The alert, rethrow and launch-message behaviour is kept. Round 2 (R5) removed the Power BI embed-token path and added the `openBehavior` handling.
 
 BEFORE
 ```js
 export async function launchTool(toolName, userEmail, userRole) {
   try {
-    const response = await fetch('https://jarc-juno.app.n8n.cloud/webhook/get-tool-creds', {
+    const response = await fetch('<webhook host>/webhook/get-tool-creds', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ toolName: toolName, email: userEmail, role: userRole })
     });
-    if (!response.ok) { throw new Error(`Authorization request failed (${response.status}).`); }
-    const data = await response.json();
-...
-      showPowerBIReport(data, toolName);
-...
-  window.powerbi.reset(pbiReportContainer);
-  window.powerbi.embed(pbiReportContainer, config);
-}
+    ...
+    if (data.category === 'Power BI' && data.accessToken) { showPowerBIReport(data, toolName); return data; }
+    if (data.targetUrl) { showEmbeddedTool(data.targetUrl, toolName); return data; }
 ```
 AFTER
 ```js
 import { apiFetch, apiErrorMessage } from './api-fetch.js';
-const GET_TOOL_CREDS_PATH = '/api/n8n/get-tool-creds';
-const EMBED_TOKEN_PATH = '/api/powerbi/embed-token';
-...
+const LAUNCH_PATH = '/api/tools/launch';
 export async function launchTool(toolName, options = {}, _legacyRole, legacyToolId) {
   const toolId = options && typeof options === 'object' ? options.toolId : legacyToolId;
   try {
-    const response = await apiFetch(GET_TOOL_CREDS_PATH, { method: 'POST', body: { toolName, ...(toolId ? { toolId } : {}) } });
+    const response = await apiFetch(LAUNCH_PATH, { method: 'POST', body: { toolName, ...(toolId ? { toolId } : {}) } });
     if (!response.ok) { throw new Error(apiErrorMessage(response.data, `Authorization request failed (${response.status}).`)); }
-    const data = response.data;
-    if (!data || typeof data !== 'object') { throw new Error('Authorization response was not valid JSON.'); }
-...
-      showPowerBIReport(data, toolName, toolId);
-...
-// + stopTokenRefresh / scheduleTokenRefresh / refreshDelayFor / startTokenRefresh / visibilitychange handler
-// + createViewerShell() and the Close button call stopTokenRefresh()
-...
-  window.powerbi.reset(pbiReportContainer);
-  const report = window.powerbi.embed(pbiReportContainer, config);
-  if (report && typeof report.setAccessToken === 'function') {
-    startTokenRefresh(report, toolName, toolId, data.expiration ?? data.tokenExpiration ?? null);
-  }
-  return report;
-}
+    ...
+    if (data.openBehavior === 'same-tab') window.location.assign(data.targetUrl);
+    else if (data.openBehavior === 'new-tab') openInNewTab(data.targetUrl, toolName);
+    else showEmbeddedTool(data.targetUrl, toolName);
 ```
 
 ### M10. DELETED `site/assets/login.js`
-- **Reason:** It was the n8n username/password login adapter. The only reference was the dynamic `import("./login.js")` at B:9985, which B1 removed. A grep of `site/` finds no remaining reference.
+- **Reason:** It was the old webhook username/password login adapter. The only reference was the dynamic `import("./login.js")` at B:9985, which B1 removed. A grep of `site/` finds no remaining reference.
 
 ---
 
 ## Config `site/onejarc-config.json`
 - **Lines:** 2-4, 44-46
-- **Reason:** No n8n URL remains in the frontend. The values are same-origin server paths, and the real URLs live only in the server environment (`N8N_URL_*`). `loginWebhookUrl` is still required by `parseRuntimeConfig` (B:37112) but is unused. `plannedConnections` is unchanged.
+- **Reason:** No backend host remains in the frontend. The values are same-origin server paths on the OneJarc server. `loginWebhookUrl` is still required by `parseRuntimeConfig` (B:37112) but is unused. `plannedConnections` is unchanged.
 
 | Key | BEFORE | AFTER |
 |---|---|---|
-| `chatWebhookUrl` | `https://<n8n host>/webhook/<chat id>` | `/api/n8n/chat` |
-| `loginWebhookUrl` | `https://<n8n host>/webhook/onejarc-login` | `/auth/login` |
-| `createToolWebhookUrl` | `https://<n8n host>/webhook/create-tool` | `/api/n8n/create-tool` |
-| `getToolsWebhookUrl` | `https://<n8n host>/webhook/get-tools` | `/api/n8n/get-tools` |
-| `getToolCredsWebhookUrl` | `https://<n8n host>/webhook/get-tool-creds` | `/api/n8n/get-tool-creds` |
-| `_comment` | "...Chat, new-tool creation, and MongoDB-backed catalog reading are connected..." | Explains that all URLs are same-origin server paths, the n8n URLs live in `N8N_URL_*`, and `loginWebhookUrl` is unused. |
+| `chatWebhookUrl` | `https://<webhook host>/webhook/<chat id>` | `/api/chat` |
+| `loginWebhookUrl` | `https://<webhook host>/webhook/onejarc-login` | `/auth/login` |
+| `createToolWebhookUrl` | `https://<webhook host>/webhook/create-tool` | `/api/tools/create` |
+| `getToolsWebhookUrl` | `https://<webhook host>/webhook/get-tools` | `/api/tools` |
+| `getToolCredsWebhookUrl` | `https://<webhook host>/webhook/get-tool-creds` | `/api/tools/launch` |
+| `_comment` | "...Chat, new-tool creation, and MongoDB-backed catalog reading are connected..." | Explains that all URLs are same-origin server paths backed by MongoDB, and that `loginWebhookUrl` is unused. |
 
 ---
 
@@ -423,12 +428,11 @@ export async function launchTool(toolName, options = {}, _legacyRole, legacyTool
 | Sign-in button / `signIn()` | navigation `/auth/login?returnTo=<path+search+hash>` | none | 302 to Entra |
 | `signOut()` | navigation `/auth/logout` | none | 302 |
 | runtime config | GET `/onejarc-config.json` (cookie) | none | JSON |
-| chat (api-client) | POST `/api/n8n/chat` | `{message}` | JSON; 401 → LoginScreen |
-| get-tools.js | GET `/api/n8n/get-tools` | none | array or `{tools}` |
-| create-tool.js | POST `/api/n8n/create-tool` | `toolPayload()` (can carry a base64 `iconImage`) | `{success:true}` |
-| delete-tool.js | POST `/api/n8n/delete-tool` | `{id}` | `{success:true}`, or 501 `{error}` |
-| edit/duplicate/publish/unpublish/enable/disable/archive/restore | POST `/api/n8n/<name>-tool` | `{action,id,requestId,publish,entry}` | `{success:true}`, or 501 `{error}` |
-| launch-tool.js | POST `/api/n8n/get-tool-creds` | `{toolName, toolId}` (the server adds `email`, `role`) | `{authorized, category, reportId, embedUrl\|targetUrl, accessToken, expiration?}` |
-| launch-tool.js refresh | POST `/api/powerbi/embed-token` | `{toolId, toolName}` | `{reportId, embedUrl, accessToken, expiration}` |
+| chat (api-client) | POST `/api/chat` | `{message}` | `{reply}`; 401 → LoginScreen; 429 when rate-limited |
+| get-tools.js | GET `/api/tools` | none | array (admins: all tools; others: live, enabled tools only) |
+| create-tool.js | POST `/api/tools/create` | `toolPayload()` + `publish` (can carry a base64 `iconImage`) | `{success:true,id}` |
+| delete-tool.js | POST `/api/tools/delete` | `{id}` | `{success:true,id}`, or 400/403/404 `{error}` |
+| edit/duplicate/publish/unpublish/enable/disable/archive/restore | POST `/api/tools/<name>` | `{action,id,requestId,publish,entry}` | `{success:true,id}` (duplicate: new `id` + `sourceId`), or 400/403/404 `{error}` |
+| launch-tool.js | POST `/api/tools/launch` | `{toolName, toolId}` | `{authorized, category, toolName, targetUrl, openBehavior}` |
 
 All `fetch` calls use `credentials: "same-origin"`. The module calls and the chat client also use `redirect: "error"`, so `/api/*` must answer 401 JSON, never a redirect.

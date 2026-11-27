@@ -1,8 +1,8 @@
-// Shared transport. URLs are same-origin server paths (/api/n8n/<action>-tool) set in
-// the individual action files; the server forwards to n8n and answers 501 until connected.
+// Shared transport. URLs are same-origin server paths (/api/tools/<action>) set in
+// the individual action files; the server writes the change to MongoDB.
 import { apiFetch } from './api-fetch.js';
 export async function postToolAction(url, action, payload, fetchImpl = fetch) {
- const target = new URL(url || '/api/n8n/' + action + '-tool', window.location.origin);
+ const target = new URL(url || '/api/tools/' + action, window.location.origin);
  if(target.origin !== window.location.origin || target.username || target.password) throw new Error('Tool actions must use a same-origin OneJarc server path.');
  let response;
  try { response = await apiFetch(target.pathname, {method:'POST', body:payload, fetchImpl}); }

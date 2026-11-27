@@ -1,4 +1,5 @@
 import session from "express-session";
+import type { Collection, Db } from "mongodb";
 
 /** The signed-in user kept in the server-side session. Tokens are never stored. */
 export interface SessionUser {
@@ -136,5 +137,54 @@ export class ExpressStoreAdapter extends session.Store {
       () => callback?.(),
       (err: unknown) => callback?.(err),
     );
+  }
+}
+
+interface MongoSessionDoc {
+  _id: string;
+  /** JSON text: session data may contain keys MongoDB rejects. */
+  json: string;
+  expiresAt: Date;
+}
+
+/**
+ * Sessions in MongoDB (`sessions` collection). A TTL index removes expired
+ * documents; reads also check expiresAt because the TTL monitor runs only once a minute.
+ * Sessions survive redeploys and are shared by all replicas.
+ */
+export class MongoSessionStore implements SessionStore {
+  private readonly col: Collection<MongoSessionDoc>;
+
+  constructor(
+    db: Db,
+    private readonly now: () => number = Date.now,
+  ) {
+    this.col = db.collection<MongoSessionDoc>("sessions");
+  }
+
+  /** Creates the TTL index. Safe to call on every start. */
+  async init(): Promise<void> {
+    await this.col.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "expiresAt_ttl" });
+  }
+
+  async get(sid: string): Promise<StoredSession | null> {
+    const doc = await this.col.findOne({ _id: sid, expiresAt: { $gt: new Date(this.now()) } });
+    return doc ? (JSON.parse(doc.json) as StoredSession) : null;
+  }
+
+  async set(sid: string, data: StoredSession, ttlMs: number): Promise<void> {
+    await this.col.updateOne(
+      { _id: sid },
+      { $set: { json: JSON.stringify(data), expiresAt: new Date(this.now() + ttlMs) } },
+      { upsert: true },
+    );
+  }
+
+  async touch(sid: string, data: StoredSession, ttlMs: number): Promise<void> {
+    await this.col.updateOne({ _id: sid }, { $set: { json: JSON.stringify(data), expiresAt: new Date(this.now() + ttlMs) } });
+  }
+
+  async destroy(sid: string): Promise<void> {
+    await this.col.deleteOne({ _id: sid });
   }
 }
