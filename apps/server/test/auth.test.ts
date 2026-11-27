@@ -18,8 +18,12 @@ function fakeMsal(claims: (urlReq: AuthorizationUrlRequest) => Record<string, un
     },
     async acquireTokenByCode(req) {
       state.codeRequests.push(req);
+      const idClaims = claims(state.urlRequests.at(-1)!);
+      // Mirror msal-node 7: the nonce is checked against request.nonce, and a token
+      // nonce with no expected nonce is rejected too.
+      if (req.nonce !== idClaims.nonce) throw new Error("ClientAuthError: nonce_mismatch");
       const account = { homeAccountId: "h", localAccountId: "l", environment: "e", tenantId: TENANT, username: "u" } as AccountInfo;
-      return { idTokenClaims: claims(state.urlRequests.at(-1)!), account } as unknown as AuthenticationResult;
+      return { idTokenClaims: idClaims, account } as unknown as AuthenticationResult;
     },
     getTokenCache() {
       return {
@@ -96,6 +100,38 @@ describe("Entra sign-in flow (fake MSAL)", () => {
     const me = await request(app).get("/api/me").set("Cookie", sid);
     expect(me.status).toBe(200);
     expect(me.body).toEqual({ name: "Grace Hopper", email: "grace@example.test", oid: USER_OID, isAdmin: false });
+  });
+
+  it("cross-site form_post: only SameSite=None cookies reach /auth/callback, and sign-in still works", async () => {
+    const msal = fakeMsal(goodClaims);
+    const app = buildApp(makeConfig(), { msalClient: msal.client });
+    const login = await startLogin(app);
+    const urlReq = msal.state.urlRequests[0]!;
+
+    // Something else (SPA /api/me poll, favicon) hits the server between login and callback.
+    await request(app).get("/api/me").set("Cookie", cookiePair(login, AUTHTX_COOKIE)!);
+    await request(app).get("/favicon.ico").set("Cookie", cookiePair(login, AUTHTX_COOKIE)!);
+
+    // What a browser sends on Microsoft's cross-site POST: SameSite=None; Secure cookies only.
+    const crossSite = setCookies(login)
+      .filter((c) => /;\s*SameSite=None/i.test(c) && /;\s*Secure/i.test(c))
+      .map((c) => c.split(";")[0]!);
+    expect(crossSite.some((c) => c.startsWith(AUTHTX_COOKIE + "="))).toBe(true);
+    expect(crossSite.some((c) => c.startsWith("onejarc.sid="))).toBe(false);
+
+    const cb = await request(app)
+      .post("/auth/callback")
+      .set("Cookie", crossSite.join("; "))
+      .set("Origin", "https://login.microsoftonline.com")
+      .type("form")
+      .send({ code: "auth-code-xsite", state: urlReq.state! });
+    expect(cb.status).toBe(302);
+    expect(cb.headers.location).toBe("/tools?x=1");
+    // The nonce sent to Entra is the one handed to acquireTokenByCode (one nonce, never regenerated).
+    expect(msal.state.urlRequests).toHaveLength(1);
+    expect(msal.state.codeRequests[0]!.nonce).toBe(urlReq.nonce);
+    const me = await request(app).get("/api/me").set("Cookie", cookiePair(cb, "onejarc.sid")!);
+    expect(me.status).toBe(200);
   });
 
   it("prefers the email claim over preferred_username", async () => {

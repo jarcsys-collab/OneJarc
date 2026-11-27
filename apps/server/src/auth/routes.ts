@@ -105,8 +105,14 @@ export function createAuthRouter(opts: { config: Config; logger: Logger; getMsal
 
   router.post("/callback", express.urlencoded({ extended: false, limit: "64kb" }), async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const tx = decryptAuthTx(readCookie(req.headers.cookie, AUTHTX_COOKIE), key);
+    const rawTx = readCookie(req.headers.cookie, AUTHTX_COOKIE);
+    const tx = decryptAuthTx(rawTx, key);
     res.clearCookie(AUTHTX_COOKIE, authTxCookieOptions);
+    // Presence only, never values: tells cross-site cookie problems apart from MSAL problems.
+    logger.info("auth.callback received", {
+      authTxCookie: rawTx === undefined ? "missing" : tx ? "valid" : "invalid",
+      sessionCookie: readCookie(req.headers.cookie, SESSION_COOKIE) !== undefined,
+    });
 
     if (!tx) {
       logger.warn("auth.callback rejected", { reason: "missing or expired login transaction" });
@@ -129,6 +135,9 @@ export function createAuthRouter(opts: { config: Config; logger: Logger; getMsal
       const result = await msal.acquireTokenByCode({
         code,
         codeVerifier: tx.verifier,
+        // Required: msal-node >= 7 rejects an ID token that carries a nonce with
+        // nonce_mismatch when no expected nonce is passed here.
+        nonce: tx.nonce,
         redirectUri: config.redirectUri,
         scopes: SCOPES,
       });
