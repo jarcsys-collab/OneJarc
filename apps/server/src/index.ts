@@ -32,6 +32,7 @@ function redact(text: string): string {
 }
 
 process.on("uncaughtException", (err) => fatal("uncaught exception", err));
+process.on("exit", (code) => stderrSync(`[onejarc] process exiting with code ${code}`));
 process.on("unhandledRejection", (err) => fatal("unhandled promise rejection", err));
 
 stderrSync(`[onejarc] starting: node ${process.version}, cwd ${process.cwd()}`);
@@ -94,17 +95,10 @@ const startingHandler: RequestListener = (req, res) => {
 };
 let handler: RequestListener = startingHandler;
 const server = http.createServer((req, res) => handler(req, res));
-// "::" accepts IPv4 and IPv6 (Railway's private network is IPv6 in older environments).
-// Hosts without IPv6 fall back to 0.0.0.0.
-let host = "::";
-server.on("error", (err: NodeJS.ErrnoException) => {
-  if (host === "::" && (err.code === "EAFNOSUPPORT" || err.code === "EADDRNOTAVAIL")) {
-    host = "0.0.0.0";
-    server.listen(config.port, host);
-    return;
-  }
-  fatal(`HTTP server error on port ${config.port}`, err);
-});
+// IPv4 on all interfaces, as in the last version that served on Railway. Railway's
+// public proxy reaches the app over IPv4; "::" can be IPv6-only in some containers.
+const host = "0.0.0.0";
+server.on("error", (err) => fatal(`HTTP server error on port ${config.port}`, err));
 server.on("listening", () => {
   logger.info("server listening", {
     port: config.port,
@@ -181,7 +175,7 @@ let shuttingDown = false;
 function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
-  logger.info("shutting down", { signal });
+  stderrSync(`[onejarc] received ${signal}, shutting down`);
   closeApp();
   server.close(() => {
     void ((mongo as Mongo | null)?.close() ?? Promise.resolve()).finally(() => process.exit(0));

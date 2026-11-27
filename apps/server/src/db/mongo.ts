@@ -14,9 +14,15 @@ export async function connectMongo(uri: string, dbName: string): Promise<Mongo> 
     connectTimeoutMS: 10_000,
     appName: "onejarc",
   });
-  await client.connect();
   const db = client.db(dbName);
-  await db.command({ ping: 1 });
+  try {
+    await client.connect();
+    await db.command({ ping: 1 });
+  } catch (err) {
+    // A failed attempt must not leave monitors running; the caller retries with a new client.
+    await client.close(true).catch(() => undefined);
+    throw err;
+  }
   return {
     db,
     async ping(timeoutMs = 3_000) {
