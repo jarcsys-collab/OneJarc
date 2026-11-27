@@ -65,7 +65,7 @@ export function powerBiEmbedUrl(def: Definition, tenantId: string): string | nul
 export function createToolsRouter(opts: { config: Config; logger: Logger; tools: ToolRepository }): Router {
   const { config, logger, tools } = opts;
   const router = Router();
-  const allowLocalHttp = config.nodeEnv !== "production";
+  const allowLocalHttp = !config.production;
 
   const actor = (req: Request) => {
     const user = currentUser(req)!;

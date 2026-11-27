@@ -70,6 +70,22 @@ describe("config", () => {
     expect(c.mongodbUri).toBe("mongodb://mongo:pw@mongodb.railway.internal:27017");
   });
 
+  it("Railway counts as production even without NODE_ENV", () => {
+    expect(loadConfig(base).production).toBe(false);
+    expect(loadConfig({ ...base, NODE_ENV: "production", MONGODB_URI: "mongodb://h" }).production).toBe(true);
+    expect(() => loadConfig({ ...base, RAILWAY_ENVIRONMENT_NAME: "production" })).toThrow(/MONGODB_URI/);
+    const c = loadConfig({ ...base, RAILWAY_ENVIRONMENT_ID: "e", MONGODB_URI: "mongodb://h" });
+    expect(c.production).toBe(true);
+    expect(c.nodeEnv).toBe("development");
+    expect(() =>
+      loadConfig({ ...base, APP_BASE_URL: "http://localhost:3000", RAILWAY_ENVIRONMENT_NAME: "x", MONGODB_URI: "mongodb://h", DEV_AUTH_BYPASS_OID: "x" }),
+    ).toThrow(/Refusing/);
+  });
+
+  it("an unresolved Railway reference in MONGODB_URI is reported by name", () => {
+    expect(() => loadConfig({ ...base, MONGODB_URI: "${{Mongo.MONGO_URL}}" })).toThrow(/unresolved Railway reference/);
+  });
+
   it("chat settings come from ANTHROPIC_API_KEY / CHAT_MODEL / CHAT_RATE_PER_MINUTE", () => {
     const c = loadConfig({ ...base, ANTHROPIC_API_KEY: "k", CHAT_MODEL: "claude-sonnet-5-5", CHAT_RATE_PER_MINUTE: "3" });
     expect(c.chat).toEqual({ anthropicApiKey: "k", model: "claude-sonnet-5-5", ratePerMinute: 3 });

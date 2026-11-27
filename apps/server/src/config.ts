@@ -18,6 +18,8 @@ export interface DevAuthBypass {
 export interface Config {
   port: number;
   nodeEnv: string;
+  /** NODE_ENV=production, or running on Railway (RAILWAY_ENVIRONMENT_* is set) even without NODE_ENV. */
+  production: boolean;
   appBaseUrl: string; // no trailing slash
   redirectUri: string;
   secureCookies: boolean;
@@ -75,6 +77,8 @@ const envSchema = z.object({
   CHAT_RATE_PER_MINUTE: opt,
   LOG_LEVEL: opt,
   RAILWAY_GIT_COMMIT_SHA: opt,
+  RAILWAY_ENVIRONMENT_ID: opt,
+  RAILWAY_ENVIRONMENT_NAME: opt,
   DEV_AUTH_BYPASS_OID: opt,
   DEV_AUTH_BYPASS_NAME: opt,
   DEV_AUTH_BYPASS_EMAIL: opt,
@@ -125,14 +129,18 @@ export function loadConfig(env: Env = process.env, opts: { cwd?: string; now?: n
   else if (e.SESSION_SECRET.length < 32) problems.push("SESSION_SECRET must be at least 32 characters long");
   const sessionHours = positiveNumber(e.SESSION_MAX_AGE_HOURS, "SESSION_MAX_AGE_HOURS", 8, problems);
 
+  const nodeEnv = e.NODE_ENV ?? "development";
+  const onRailway = Boolean(e.RAILWAY_ENVIRONMENT_ID || e.RAILWAY_ENVIRONMENT_NAME);
+  const production = nodeEnv === "production" || onRailway;
+
   // --- dev bypass (local automated testing only) ---
   let devAuthBypass: DevAuthBypass | null = null;
   if (e.DEV_AUTH_BYPASS_OID) {
     const isLocal =
       appUrl !== null && appUrl.protocol === "http:" && (appUrl.hostname === "localhost" || appUrl.hostname === "127.0.0.1");
-    if (e.NODE_ENV === "production" || !isLocal) {
+    if (production || !isLocal) {
       throw new ConfigError(
-        "Refusing to start: DEV_AUTH_BYPASS_OID is set, but it is only allowed when NODE_ENV is not 'production' " +
+        "Refusing to start: DEV_AUTH_BYPASS_OID is set, but it is only allowed outside production (NODE_ENV=production or Railway) " +
           "and APP_BASE_URL is http://localhost or http://127.0.0.1. Remove DEV_AUTH_BYPASS_* from the environment.",
       );
     }
@@ -153,9 +161,10 @@ export function loadConfig(env: Env = process.env, opts: { cwd?: string; now?: n
   if (!cloudInstance.endsWith("/")) cloudInstance += "/";
 
   // --- misc ---
-  const nodeEnv = e.NODE_ENV ?? "development";
-  if (!e.MONGODB_URI && nodeEnv === "production") missing.push("MONGODB_URI");
-  if (e.MONGODB_URI && !/^mongodb(\+srv)?:\/\//.test(e.MONGODB_URI)) {
+  if (!e.MONGODB_URI && production) missing.push("MONGODB_URI");
+  if (e.MONGODB_URI?.includes("${{")) {
+    problems.push("MONGODB_URI contains an unresolved Railway reference (${{...}}): check the referenced service name");
+  } else if (e.MONGODB_URI && !/^mongodb(\+srv)?:\/\//.test(e.MONGODB_URI)) {
     problems.push("MONGODB_URI must start with mongodb:// or mongodb+srv://");
   }
   const chatRate = positiveNumber(e.CHAT_RATE_PER_MINUTE, "CHAT_RATE_PER_MINUTE", 10, problems);
@@ -191,6 +200,7 @@ export function loadConfig(env: Env = process.env, opts: { cwd?: string; now?: n
   return {
     port,
     nodeEnv,
+    production,
     appBaseUrl,
     redirectUri: `${appBaseUrl}/auth/callback`,
     secureCookies: appUrl?.protocol === "https:",

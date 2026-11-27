@@ -220,7 +220,9 @@ Admin rights in OneJarc don't come from Entra. They come from `ADMIN_OBJECT_IDS`
 1. Open the service → **Deployments** tab, then the latest deployment → **View logs** (Build and Deploy logs).
    - The deployment becomes **Active** only after `/health` answers.
    - If the healthcheck fails, the old deployment (if any) keeps serving.
-2. Open `https://<your-railway-domain>/health`. You should see `{"ok":true,"build":"...","db":"ok"}`. If MongoDB is down it answers 503 with `"db":"down"`.
+2. Open `https://<your-railway-domain>/health`. You should see `{"ok":true,"build":"...","db":"ok"}`.
+   - While MongoDB can't be reached, the server still starts and keeps retrying. `/health` answers 503 with `"db":"connecting"` or `"db":"down"` plus an `error` that says why, and the same reason appears in the Deploy Logs as `database not ready; retrying`.
+   - Configuration errors appear in the Deploy Logs as `[onejarc] FATAL ...`. The server treats Railway as production even when `NODE_ENV` is not set.
 3. Open `https://<your-railway-domain>/` and sign in.
 
 ### 4.9 Good to know
